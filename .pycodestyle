@@ -1,0 +1,5 @@
+[pycodestyle]
+max-line-length = 100
+# E221: multiple spaces before operator — intentionally used for
+#       aligned assignments in config/colour blocks. Suppress globally.
+ignore = E221

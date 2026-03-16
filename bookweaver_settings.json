@@ -1,0 +1,11 @@
+{
+  "_comment": "BookWeaver settings — edit this file to add/remove Ollama models. No code changes needed.",
+  "models": [
+    { "label": "Gemma 3 27B  (recommended)",  "value": "gemma3:27b"   },
+    { "label": "Llama 3.3 70B",               "value": "llama3.3:70b" },
+    { "label": "Mistral 7B",                  "value": "mistral:7b"   },
+    { "label": "Qwen 2.5 14B",                "value": "qwen2.5:14b"  },
+    { "label": "Phi-4 14B",                   "value": "phi4:14b"     }
+  ],
+  "default_model": "gemma3:27b"
+}
