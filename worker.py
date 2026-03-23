@@ -17,14 +17,7 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from prompts import build_summary_prompt, build_rewrite_prompt
-
-
-# ──────────────────────────────────────────────────────────────
-#  TEMPERATURE MAPPING
-# ──────────────────────────────────────────────────────────────
-def creativity_to_temperature(creativity: int) -> float:
-    """Map creativity 1–10 linearly to Ollama temperature 0.1–1.4."""
-    return round(0.1 + (creativity - 1) * (1.3 / 9), 2)
+from settings import creativity_to_temperature
 
 
 # ──────────────────────────────────────────────────────────────
@@ -81,7 +74,10 @@ class ProcessingWorker(QThread):
         model = cfg["model"]
         first_only = cfg["first_only"]
         out_format = cfg["out_format"]
-        out_folder = Path(cfg.get("out_folder") or Path(epub_path).parent)
+        out_folder = (
+            Path(cfg["out_folder"]) if cfg.get("out_folder")
+            else Path(epub_path).parent
+        )
         creativity = cfg["creativity"]
         temperature = creativity_to_temperature(creativity)
         meta = {
@@ -162,6 +158,7 @@ class ProcessingWorker(QThread):
             if spanish is None:
                 self.finished.emit(False, "")
                 return
+            spanish = self._strip_asterisk_markers(spanish)
             step += 1
             self.progress.emit(step, total_steps)
 
@@ -276,6 +273,11 @@ class ProcessingWorker(QThread):
         return out_path
 
     # ── ollama helper ─────────────────────────────────────────
+    @staticmethod
+    def _strip_asterisk_markers(text: str) -> str:
+        """Remove *word* / *phrase* markers the LLM adds around proper nouns."""
+        import re
+        return re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'\1', text)
     def _ollama_call(
         self,
         model: str,

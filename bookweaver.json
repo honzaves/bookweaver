@@ -1,0 +1,28 @@
+{
+  "_comment": "BookWeaver config — edit colours and models here. No code changes needed.",
+
+  "colors": {
+    "bg":        "#111210",
+    "surface":   "#1c1d1b",
+    "surface2":  "#252620",
+    "border":    "#2e2f2a",
+    "amber":     "#d4a853",
+    "amber_dim": "#8a6a2e",
+    "text":      "#e8e4d9",
+    "muted":     "#7a7870",
+    "success":   "#7aab6e",
+    "warning":   "#c98d3a",
+    "error":     "#c0604a",
+    "sweet":     "#7aab6e"
+  },
+
+  "models": [
+    { "label": "Gemma 3 27B  (recommended)", "value": "gemma3:27b"   },
+    { "label": "Llama 3.3 70B",              "value": "llama3.3:70b" },
+    { "label": "Mistral 7B",                 "value": "mistral:7b"   },
+    { "label": "Qwen 2.5 14B",               "value": "qwen2.5:14b"  },
+    { "label": "Phi-4 14B",                  "value": "phi4:14b"     }
+  ],
+
+  "default_model": "gemma3:27b"
+}

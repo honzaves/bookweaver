@@ -39,6 +39,7 @@ from settings import (
     C_TEXT,
     C_WARNING,
     C_BORDER,
+    creativity_to_temperature,
 )
 
 
@@ -178,7 +179,7 @@ class CreativitySlider(QWidget):
 
     def _on_change(self, v: int) -> None:
         label, colour = self.LABELS.get(v, ("Custom", C_TEXT))
-        temp = round(0.1 + (v - 1) * (1.3 / 9), 2)
+        temp = creativity_to_temperature(v)
         tag = "  ✦ sweet spot" if 5 <= v <= 6 else ""
         self._readout.setText(
             f"{label}  —  level {v}/10   (temperature ≈ {temp}){tag}"

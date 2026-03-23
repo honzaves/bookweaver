@@ -1,46 +1,60 @@
 """
 settings.py
 -----------
-Colour palette, Qt stylesheet, and settings loader.
+Loads bookweaver.json and exposes colour constants, the Qt stylesheet,
+and the SETTINGS dict to the rest of the application.
 
-All other modules import colours and SETTINGS from here.
-The JSON settings file lives next to this file and controls
-the model list without requiring any code changes.
+To change colours or models, edit bookweaver.json — no Python changes needed.
 """
 
 import json
 from pathlib import Path
 
-
-# ──────────────────────────────────────────────────────────────
-#  COLOUR PALETTE
-# ──────────────────────────────────────────────────────────────
-C_BG = "#111210"
-C_SURFACE = "#1c1d1b"
-C_SURFACE2 = "#252620"
-C_BORDER = "#2e2f2a"
-C_AMBER = "#d4a853"
-C_AMBER_DIM = "#8a6a2e"
-C_TEXT = "#e8e4d9"
-C_MUTED = "#7a7870"
-C_SUCCESS = "#7aab6e"
-C_WARNING = "#c98d3a"
-C_ERROR = "#c0604a"
-C_SWEET = "#7aab6e"  # sweet-spot highlight on sliders
+_CONFIG_PATH = Path(__file__).parent / "bookweaver.json"
 
 
 # ──────────────────────────────────────────────────────────────
-#  QT STYLESHEET
+#  CONFIG LOADER
 # ──────────────────────────────────────────────────────────────
-STYLESHEET = f"""
+def _load_config(path: Path = _CONFIG_PATH) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        raise SystemExit(f"[BookWeaver] Config file not found: {path}")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"[BookWeaver] Invalid JSON in config: {exc}")
+
+
+def _build(path: Path = _CONFIG_PATH) -> None:
+    """Load config and populate all module-level constants."""
+    global C_BG, C_SURFACE, C_SURFACE2, C_BORDER, C_AMBER, C_AMBER_DIM
+    global C_TEXT, C_MUTED, C_SUCCESS, C_WARNING, C_ERROR, C_SWEET
+    global STYLESHEET, SETTINGS
+
+    cfg = _load_config(path)
+    c = cfg["colors"]
+
+    C_BG        = c["bg"]
+    C_SURFACE   = c["surface"]
+    C_SURFACE2  = c["surface2"]
+    C_BORDER    = c["border"]
+    C_AMBER     = c["amber"]
+    C_AMBER_DIM = c["amber_dim"]
+    C_TEXT      = c["text"]
+    C_MUTED     = c["muted"]
+    C_SUCCESS   = c["success"]
+    C_WARNING   = c["warning"]
+    C_ERROR     = c["error"]
+    C_SWEET     = c["sweet"]
+
+    STYLESHEET = f"""
 QMainWindow, QWidget {{
     background-color: {C_BG};
     color: {C_TEXT};
     font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
     font-size: 13px;
 }}
-
-/* ── GROUP BOXES ── */
 QGroupBox {{
     background-color: {C_SURFACE};
     border: 1px solid {C_BORDER};
@@ -61,8 +75,6 @@ QGroupBox::title {{
     padding: 0 6px;
     background-color: {C_SURFACE};
 }}
-
-/* ── LABELS ── */
 QLabel {{
     background: transparent;
     color: {C_TEXT};
@@ -77,8 +89,6 @@ QLabel#amber {{
     font-weight: 700;
     letter-spacing: -0.5px;
 }}
-
-/* ── LINE EDIT ── */
 QLineEdit {{
     background-color: {C_SURFACE2};
     border: 1px solid {C_BORDER};
@@ -90,8 +100,6 @@ QLineEdit {{
 QLineEdit:focus {{
     border-color: {C_AMBER};
 }}
-
-/* ── COMBO BOX ── */
 QComboBox {{
     background-color: {C_SURFACE2};
     border: 1px solid {C_BORDER};
@@ -121,8 +129,6 @@ QComboBox QAbstractItemView {{
     color: {C_TEXT};
     padding: 4px;
 }}
-
-/* ── SLIDER ── */
 QSlider::groove:horizontal {{
     height: 4px;
     background: {C_BORDER};
@@ -142,8 +148,6 @@ QSlider::handle:horizontal {{
 QSlider::handle:horizontal:hover {{
     background: #e8c070;
 }}
-
-/* ── BUTTONS ── */
 QPushButton {{
     background-color: {C_SURFACE2};
     border: 1px solid {C_BORDER};
@@ -186,8 +190,6 @@ QPushButton#danger:hover {{
     background-color: {C_ERROR};
     color: {C_TEXT};
 }}
-
-/* ── CHECKBOX & RADIO ── */
 QCheckBox, QRadioButton {{
     spacing: 8px;
     color: {C_TEXT};
@@ -206,8 +208,6 @@ QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
     background-color: {C_AMBER};
     border-color: {C_AMBER};
 }}
-
-/* ── TEXT EDIT (log) ── */
 QTextEdit {{
     background-color: {C_SURFACE};
     border: 1px solid {C_BORDER};
@@ -218,8 +218,6 @@ QTextEdit {{
     font-size: 12px;
     line-height: 1.5;
 }}
-
-/* ── SCROLL BARS ── */
 QScrollBar:vertical {{
     background: {C_BG};
     width: 8px;
@@ -236,42 +234,24 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
     background: none;
 }}
-
-/* ── SEPARATOR ── */
 QFrame[frameShape="4"], QFrame[frameShape="5"] {{
     color: {C_BORDER};
 }}
 """
 
+    SETTINGS = {
+        "models":        cfg["models"],
+        "default_model": cfg["default_model"],
+    }
+
+
+# Initialise module-level constants from the default config path.
+_build()
+
 
 # ──────────────────────────────────────────────────────────────
-#  SETTINGS LOADER
+#  CREATIVITY → TEMPERATURE MAPPING
 # ──────────────────────────────────────────────────────────────
-_SETTINGS_PATH = Path(__file__).parent / "bookweaver_settings.json"
-
-_DEFAULT_SETTINGS: dict = {
-    "models": [
-        {"label": "Gemma 3 27B  (recommended)", "value": "gemma3:27b"},
-        {"label": "Llama 3.3 70B", "value": "llama3.3:70b"},
-    ],
-    "default_model": "gemma3:27b",
-}
-
-
-def load_settings() -> dict:
-    """Load bookweaver_settings.json, falling back to defaults on any error."""
-    try:
-        with open(_SETTINGS_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        for key, value in _DEFAULT_SETTINGS.items():
-            data.setdefault(key, value)
-        return data
-    except FileNotFoundError:
-        return _DEFAULT_SETTINGS.copy()
-    except Exception as exc:
-        print(f"[BookWeaver] Could not read settings: {exc} — using defaults.")
-        return _DEFAULT_SETTINGS.copy()
-
-
-# Module-level singleton — import SETTINGS from here everywhere.
-SETTINGS: dict = load_settings()
+def creativity_to_temperature(creativity: int) -> float:
+    """Map creativity 1–10 linearly to Ollama temperature 0.1–1.4."""
+    return round(0.1 + (creativity - 1) * (1.3 / 9), 2)

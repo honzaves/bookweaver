@@ -351,8 +351,10 @@ class BookWeaverApp(QMainWindow):
                 self._meta_title.setText(title[0][0])
             if author:
                 self._meta_creator.setText(author[0][0])
-        except Exception:
-            pass  # fields stay blank — not a fatal error
+        except Exception as exc:
+            self.statusBar().showMessage(
+                f"Could not read EPUB metadata: {exc}", 5000
+            )
 
         if not self._out_folder.path():
             self._out_folder.set_path(str(Path(path).parent))
