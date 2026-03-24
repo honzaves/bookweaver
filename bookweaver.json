@@ -1,6 +1,8 @@
 {
   "_comment": "BookWeaver config — edit colours and models here. No code changes needed.",
 
+  "ollama_timeout": 600,
+
   "colors": {
     "bg":        "#111210",
     "surface":   "#1c1d1b",

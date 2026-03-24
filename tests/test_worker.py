@@ -277,7 +277,7 @@ class TestOllamaCall:
         mock_resp = self._mock_response("Este es el resultado.")
         p, _ = self._patched_client(mock_resp)
         with p:
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1")
+            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
         assert result == "Este es el resultado."
 
     def test_empty_response_returns_none(self):
@@ -285,7 +285,7 @@ class TestOllamaCall:
         mock_resp = self._mock_response("")
         p, _ = self._patched_client(mock_resp)
         with p:
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1")
+            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
         assert result is None
 
     def test_whitespace_only_response_returns_none(self):
@@ -293,7 +293,7 @@ class TestOllamaCall:
         mock_resp = self._mock_response("   \n\n   ")
         p, _ = self._patched_client(mock_resp)
         with p:
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1")
+            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
         assert result is None
 
     def test_http_error_returns_none(self):
@@ -301,19 +301,19 @@ class TestOllamaCall:
         mock_resp = self._mock_response("", status=500)
         p, _ = self._patched_client(mock_resp)
         with p:
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1")
+            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
         assert result is None
 
     def test_connection_error_returns_none(self):
         w = _make_worker()
         with patch("httpx.Client", side_effect=ConnectionError("refused")):
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1")
+            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
         assert result is None
 
     def test_connection_error_emits_log(self):
         w = _make_worker()
         with patch("httpx.Client", side_effect=ConnectionError("refused")):
-            w._ollama_call("gemma3:27b", "Test prompt", label="T1")
+            w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
         w.log.emit.assert_called()
         args = w.log.emit.call_args[0]
         assert args[1] == "error"
@@ -332,7 +332,7 @@ class TestOllamaCall:
         mock_resp = self._mock_response("ok")
         p, mock_client = self._patched_client(mock_resp)
         with p:
-            w._ollama_call("llama3.3:70b", "prompt")
+            w._ollama_call("llama3.3:70b", "prompt", temperature=0.7)
         payload = mock_client.post.call_args[1]["json"]
         assert payload["model"] == "llama3.3:70b"
 
@@ -341,5 +341,5 @@ class TestOllamaCall:
         mock_resp = self._mock_response("  stripped text  ")
         p, _ = self._patched_client(mock_resp)
         with p:
-            result = w._ollama_call("gemma3:27b", "prompt")
+            result = w._ollama_call("gemma3:27b", "prompt", temperature=0.7)
         assert result == "stripped text"

@@ -1,6 +1,6 @@
 # BookWeaver
 
-**BookWeaver** is a desktop app that takes an English EPUB, compresses each
+**BookWeaver** is a desktop app that takes an English EPUB, condenses each
 chapter to a chosen length, then rewrites it in Spanish at a target CEFR
 language level — all powered by a local [Ollama](https://ollama.com) model.
 
@@ -11,9 +11,9 @@ language level — all powered by a local [Ollama](https://ollama.com) model.
 | Feature | Detail |
 |---|---|
 | EPUB source | File picker filtered to `.epub` files |
-| Model selection | Dropdown loaded from `bookweaver_settings.json` — no code changes to add models |
+| Model selection | Dropdown loaded from `bookweaver.json` — no code changes to add models |
 | CEFR levels | B1 · B2 · C1 · C2 |
-| Summarisation slider | Keep 10–90 % of each chapter; sweet spot highlighted at 30–50 % |
+| Condensation slider | Keep 10–90 % of each chapter; sweet spot highlighted at 30–50 % |
 | Creativity slider | 1–10 scale controlling LLM elaboration freedom and Ollama temperature |
 | Output format | Plain text (`.txt`) or EPUB (`.epub`) |
 | EPUB metadata | Title, Author, Language, Contributor — pre-filled from source file |
@@ -33,7 +33,13 @@ language level — all powered by a local [Ollama](https://ollama.com) model.
 ### Python dependencies
 
 ```bash
-pip install PyQt6 ebooklib httpx beautifulsoup4
+pip install -r requirements.txt
+```
+
+Or for development (includes pytest):
+
+```bash
+pip install -r requirements-dev.txt
 ```
 
 ---
@@ -41,7 +47,6 @@ pip install PyQt6 ebooklib httpx beautifulsoup4
 ## Running
 
 ```bash
-cd book_weaver
 python main.py
 ```
 
@@ -50,24 +55,31 @@ python main.py
 ## Project structure
 
 ```
-book_weaver/
-├── main.py                   Entry point — creates QApplication and main window
-├── app.py                    BookWeaverApp (QMainWindow) — all UI wiring
-├── worker.py                 ProcessingWorker (QThread) — pipeline logic
-├── prompts.py                LLM prompt builders
-├── widgets.py                Reusable custom Qt widgets
-├── settings.py               Colours, stylesheet, settings loader
-├── bookweaver_settings.json  Model list and default — edit freely
-└── .pycodestyle              pycodestyle config (suppresses E221)
+bookweaver/
+├── main.py              Entry point — creates QApplication and main window
+├── app.py               BookWeaverApp (QMainWindow) — all UI wiring
+├── worker.py            ProcessingWorker (QThread) — pipeline logic
+├── prompts.py           LLM prompt builders
+├── widgets.py           Reusable custom Qt widgets
+├── settings.py          Config loader — reads bookweaver.json, builds stylesheet
+├── bookweaver.json      All user-editable settings: colours and models
+├── pyproject.toml       Project metadata and tool config
+├── requirements.txt     Runtime dependencies
+├── requirements-dev.txt Dev/test dependencies
+└── tests/
+    ├── conftest.py      PyQt6 stubs so tests run without Qt installed
+    ├── test_prompts.py
+    ├── test_settings.py
+    └── test_worker.py
 ```
 
 ---
 
 ## Configuration
 
-### Adding a model
+Everything user-editable lives in `bookweaver.json`. No Python changes needed.
 
-Edit `bookweaver_settings.json`:
+### Adding a model
 
 ```json
 {
@@ -80,6 +92,11 @@ Edit `bookweaver_settings.json`:
 
 Restart the app and the new model appears in the dropdown.
 
+### Changing colours
+
+Edit the `"colors"` block in `bookweaver.json`. All hex values are standard
+`#RRGGBB`. The stylesheet is rebuilt from these values on every launch.
+
 ### Tuning prompts
 
 Open `prompts.py`. The two functions `build_summary_prompt` and
@@ -89,11 +106,21 @@ string constants — edit them directly.
 
 ---
 
+## Running tests
+
+```bash
+pytest
+```
+
+No Qt installation required — the test suite stubs out PyQt6.
+
+---
+
 ## Recommended settings
 
 | Setting | Value | Why |
 |---|---|---|
-| Summarisation | 30–50 % | Keeps core story, removes padding |
+| Condensation | 30–50 % | Keeps core story, removes padding |
 | Creativity | 5–6 | Adds atmosphere without inventing events |
 | Model | `gemma3:27b` | Fast on Apple Silicon, good Spanish quality |
 | First chapter only | ✅ on first run | Validate prompts cheaply before full run |
@@ -109,4 +136,4 @@ A 30-chapter book takes roughly **1–2 hours** end-to-end.
 
 `llama3.3:70b` (~43 GB) fits comfortably in 96 GB and produces higher
 quality Spanish, but runs at ~10–12 tokens/second.
-Switch by changing `default_model` in the settings file.
+Switch by changing `default_model` in `bookweaver.json`.

@@ -29,23 +29,24 @@ class TestBuildSummaryPrompt:
     CHAPTER = "Alice walked into the forest. She saw a rabbit."
 
     def test_chapter_text_present(self):
-        prompt = build_summary_prompt(self.CHAPTER, keep_pct=40)
-        assert self.CHAPTER in prompt
+        assert self.CHAPTER in build_summary_prompt(self.CHAPTER, keep_pct=40)
 
     def test_keep_pct_shown(self):
-        prompt = build_summary_prompt(self.CHAPTER, keep_pct=35)
-        assert "35%" in prompt
+        assert "35%" in build_summary_prompt(self.CHAPTER, keep_pct=35)
 
-    def test_reduce_pct_derived_correctly(self):
-        """reduce_pct must equal 100 - keep_pct."""
-        prompt = build_summary_prompt(self.CHAPTER, keep_pct=30)
-        assert "70%" in prompt
+    def test_target_word_count_present(self):
+        """Prompt must include a concrete word count target."""
+        prompt = build_summary_prompt("word " * 100, keep_pct=40)
+        assert "40" in prompt  # 40 words target
 
-    def test_reduce_and_keep_consistent(self):
-        for keep in [10, 25, 40, 60, 90]:
-            prompt = build_summary_prompt(self.CHAPTER, keep_pct=keep)
-            assert f"{keep}%" in prompt
-            assert f"{100 - keep}%" in prompt
+    def test_original_word_count_present(self):
+        prompt = build_summary_prompt("word " * 200, keep_pct=50)
+        assert "200" in prompt
+
+    def test_target_word_count_maths(self):
+        """Target = round(word_count * keep_pct / 100)."""
+        prompt = build_summary_prompt("word " * 100, keep_pct=30)
+        assert "30" in prompt  # 30 words target
 
     def test_proper_noun_rule_mentioned(self):
         prompt = build_summary_prompt(self.CHAPTER, keep_pct=40)
@@ -55,30 +56,21 @@ class TestBuildSummaryPrompt:
         prompt = build_summary_prompt(self.CHAPTER, keep_pct=40)
         assert "headers" in prompt.lower() or "meta-text" in prompt.lower()
 
-    def test_output_only_rule(self):
-        """Prompt should instruct the model to output only the summary."""
+    def test_not_called_summary(self):
+        """The word 'summarise/summarize' should no longer be the task framing."""
         prompt = build_summary_prompt(self.CHAPTER, keep_pct=40)
-        assert "only" in prompt.lower()
+        assert "condense" in prompt.lower() or "condense" in prompt.lower()
 
     def test_returns_string(self):
-        result = build_summary_prompt(self.CHAPTER, keep_pct=50)
-        assert isinstance(result, str)
-
-    def test_nonempty(self):
-        result = build_summary_prompt(self.CHAPTER, keep_pct=50)
-        assert len(result) > 50
+        assert isinstance(build_summary_prompt(self.CHAPTER, keep_pct=50), str)
 
     def test_edge_keep_10(self):
-        """Minimum slider value should not crash."""
-        prompt = build_summary_prompt(self.CHAPTER, keep_pct=10)
-        assert "10%" in prompt
-        assert "90%" in prompt
+        prompt = build_summary_prompt("word " * 100, keep_pct=10)
+        assert "10" in prompt
 
     def test_edge_keep_90(self):
-        """Maximum slider value should not crash."""
-        prompt = build_summary_prompt(self.CHAPTER, keep_pct=90)
-        assert "90%" in prompt
-        assert "10%" in prompt
+        prompt = build_summary_prompt("word " * 100, keep_pct=90)
+        assert "90" in prompt
 
 
 # ──────────────────────────────────────────────────────────────

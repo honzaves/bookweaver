@@ -30,7 +30,7 @@ def _build(path: Path = _CONFIG_PATH) -> None:
     """Load config and populate all module-level constants."""
     global C_BG, C_SURFACE, C_SURFACE2, C_BORDER, C_AMBER, C_AMBER_DIM
     global C_TEXT, C_MUTED, C_SUCCESS, C_WARNING, C_ERROR, C_SWEET
-    global STYLESHEET, SETTINGS
+    global STYLESHEET, SETTINGS, OLLAMA_TIMEOUT
 
     cfg = _load_config(path)
     c = cfg["colors"]
@@ -243,6 +243,8 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
         "models":        cfg["models"],
         "default_model": cfg["default_model"],
     }
+
+    OLLAMA_TIMEOUT = int(cfg.get("ollama_timeout", 600))
 
 
 # Initialise module-level constants from the default config path.

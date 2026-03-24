@@ -17,7 +17,7 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from prompts import build_summary_prompt, build_rewrite_prompt
-from settings import creativity_to_temperature
+from settings import creativity_to_temperature, OLLAMA_TIMEOUT
 
 
 # ──────────────────────────────────────────────────────────────
@@ -133,6 +133,7 @@ class ProcessingWorker(QThread):
                 model,
                 build_summary_prompt(text, keep_pct),
                 label=f"Summary {idx + 1}",
+                temperature=temperature,
             )
             if summary is None:
                 self.finished.emit(False, "")
@@ -282,8 +283,9 @@ class ProcessingWorker(QThread):
         self,
         model: str,
         prompt: str,
+        *,
         label: str = "",
-        temperature: float = 0.7,
+        temperature: float,
     ) -> str | None:
         """
         Send *prompt* to the local Ollama instance and return the response
@@ -294,7 +296,7 @@ class ProcessingWorker(QThread):
             self.log.emit(
                 f"   ↳ Calling {model} (temp={temperature})…", "muted"
             )
-            with httpx.Client(timeout=300) as client:
+            with httpx.Client(timeout=OLLAMA_TIMEOUT) as client:
                 response = client.post(
                     "http://localhost:11434/api/generate",
                     json={

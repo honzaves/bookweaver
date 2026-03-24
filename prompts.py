@@ -84,23 +84,28 @@ def _creativity_instruction(level: int) -> str:
 # ──────────────────────────────────────────────────────────────
 def build_summary_prompt(chapter_text: str, keep_pct: int) -> str:
     """
-    Return a prompt that asks the LLM to summarise *chapter_text*,
+    Return a prompt that asks the LLM to condense *chapter_text*,
     retaining approximately *keep_pct* percent of the original length.
     """
-    reduce_pct = 100 - keep_pct
+    word_count = len(chapter_text.split())
+    target_words = round(word_count * keep_pct / 100)
     return (
         "You are a precise literary editor. "
-        "Your task is to summarise the following book chapter.\n\n"
-        "RULES:\n"
-        f"- Reduce the text by approximately {reduce_pct}%, "
-        f"keeping only ~{keep_pct}% of the original length.\n"
+        "Your task is to condense the following book chapter to a specific length.\n\n"
+        "LENGTH REQUIREMENT (most important rule):\n"
+        f"- The original text is approximately {word_count} words.\n"
+        f"- Your output MUST be approximately {target_words} words "
+        f"({keep_pct}% of the original).\n"
+        f"- Do NOT produce a short summary. At {keep_pct}% you should retain "
+        "most of the original prose, scenes, and detail.\n\n"
+        "CONTENT RULES:\n"
         "- Preserve all plot events, character motivations, emotional beats, "
         "and narrative tension.\n"
         "- Keep all proper nouns exactly as written: character names, place "
         "names, and organisation names must NOT be translated or altered.\n"
         "- Write in clear, neutral English prose.\n"
         "- Do NOT add commentary, headers, or meta-text. "
-        "Output only the summary.\n\n"
+        "Output only the condensed text.\n\n"
         f"CHAPTER TEXT:\n{chapter_text}\n"
     )
 

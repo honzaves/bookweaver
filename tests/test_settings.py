@@ -13,7 +13,7 @@ import settings as settings_module
 from settings import (
     C_AMBER, C_AMBER_DIM, C_BG, C_BORDER, C_ERROR, C_MUTED,
     C_SUCCESS, C_SURFACE, C_SURFACE2, C_TEXT, C_WARNING,
-    SETTINGS, STYLESHEET, creativity_to_temperature,
+    SETTINGS, STYLESHEET, OLLAMA_TIMEOUT, creativity_to_temperature,
     _load_config, _build,
 )
 
@@ -169,3 +169,29 @@ class TestSettings:
     def test_default_model_in_models_list(self):
         values = [m["value"] for m in SETTINGS["models"]]
         assert SETTINGS["default_model"] in values
+
+
+# ──────────────────────────────────────────────────────────────
+#  OLLAMA_TIMEOUT
+# ──────────────────────────────────────────────────────────────
+class TestOllamaTimeout:
+    def test_is_int(self):
+        assert isinstance(OLLAMA_TIMEOUT, int)
+
+    def test_positive(self):
+        assert OLLAMA_TIMEOUT > 0
+
+    def test_loaded_from_json(self, tmp_path):
+        cfg = {**MINIMAL_CFG, "ollama_timeout": 999}
+        p = _write_json(tmp_path, cfg)
+        _build(p)
+        import settings as s
+        assert s.OLLAMA_TIMEOUT == 999
+        _build()  # restore
+
+    def test_defaults_when_missing(self, tmp_path):
+        p = _write_json(tmp_path, MINIMAL_CFG)  # no ollama_timeout key
+        _build(p)
+        import settings as s
+        assert s.OLLAMA_TIMEOUT == 600
+        _build()  # restore
