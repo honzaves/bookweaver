@@ -46,6 +46,10 @@ class ProcessingWorker(QThread):
         super().__init__()
         self.config = config
         self._abort = False
+        self._timeout = config.get("timeout", OLLAMA_TIMEOUT)
+        # Populated during run(); readable by the app after finished(False).
+        self.completed_results: list[tuple[str, str]] = []
+        self.failed_at_chapter: int = 0
 
     def abort(self) -> None:
         """Request a clean stop after the current Ollama call."""
@@ -80,6 +84,7 @@ class ProcessingWorker(QThread):
         )
         creativity = cfg["creativity"]
         temperature = creativity_to_temperature(creativity)
+        resume_from = cfg.get("resume_from", 0)
         meta = {
             "title": cfg.get("meta_title") or Path(epub_path).stem,
             "creator": cfg.get("meta_creator") or "",
@@ -114,56 +119,101 @@ class ProcessingWorker(QThread):
             self.log.emit("ℹ️   Processing first chapter only.", "info")
 
         total_steps = len(chapters) * 2
-        self.log.emit(f"✅  Found {len(chapters)} chapter(s) to process.", "success")
+        # Seed results and progress from any previously completed chapters.
+        results: list[tuple[str, str]] = list(cfg.get("prior_results", []))
+        step = resume_from * 2
 
-        results = []
-        step = 0
-
-        for idx, (_name, text) in enumerate(chapters):
-            if self._abort:
-                self.log.emit("⛔  Aborted by user.", "warning")
-                self.finished.emit(False, "")
-                return
-
-            # ── step 1: summarise ─────────────────────────────
+        if resume_from > 0:
             self.log.emit(
-                f"\n── Chapter {idx + 1}/{len(chapters)}: summarising…", "info"
-            )
-            summary = self._ollama_call(
-                model,
-                build_summary_prompt(text, keep_pct),
-                label=f"Summary {idx + 1}",
-                temperature=temperature,
-            )
-            if summary is None:
-                self.finished.emit(False, "")
-                return
-            step += 1
-            self.progress.emit(step, total_steps)
-
-            if self._abort:
-                break
-
-            # ── step 2: rewrite in Spanish ────────────────────
-            self.log.emit(
-                f"── Chapter {idx + 1}/{len(chapters)}: "
-                f"rewriting in Spanish ({level}, creativity {creativity}/10)…",
+                f"⏩  Resuming from chapter {resume_from + 1} "
+                f"({resume_from} chapter(s) already done).",
                 "info",
             )
-            spanish = self._ollama_call(
-                model,
-                build_rewrite_prompt(summary, level, idx, creativity),
-                label=f"Rewrite {idx + 1}",
-                temperature=temperature,
-            )
-            if spanish is None:
+        else:
+            self.log.emit(f"✅  Found {len(chapters)} chapter(s) to process.", "success")
+
+        for idx, (_name, text) in enumerate(chapters):
+            # Skip chapters already completed in a prior run.
+            if idx < resume_from:
+                continue
+
+            if self._abort:
+                self.log.emit("⛔  Aborted by user.", "warning")
+                self.completed_results = results
+                self.failed_at_chapter = idx
                 self.finished.emit(False, "")
                 return
-            spanish = self._strip_asterisk_markers(spanish)
-            step += 1
-            self.progress.emit(step, total_steps)
 
-            results.append((f"Capítulo {idx + 1}", spanish))
+            chunks = self._split_into_chunks(text)
+            n_chunks = len(chunks)
+            if n_chunks > 1:
+                self.log.emit(
+                    f"\n── Chapter {idx + 1}/{len(chapters)}: "
+                    f"split into {n_chunks} chunks (~2000 words each).", "info"
+                )
+
+            spanish_parts: list[str] = []
+
+            for chunk_idx, chunk in enumerate(chunks):
+                chunk_label = (
+                    f"{idx + 1}.{chunk_idx + 1}/{n_chunks}"
+                    if n_chunks > 1 else str(idx + 1)
+                )
+
+                if self._abort:
+                    self.log.emit("⛔  Aborted by user.", "warning")
+                    self.completed_results = results
+                    self.failed_at_chapter = idx
+                    self.finished.emit(False, "")
+                    return
+
+                # ── step 1: summarise ─────────────────────────────
+                self.log.emit(
+                    f"\n── Chapter {chunk_label}/{len(chapters)}: summarising…", "info"
+                )
+                summary = self._ollama_call(
+                    model,
+                    build_summary_prompt(chunk, keep_pct),
+                    label=f"Summary {chunk_label}",
+                    temperature=temperature,
+                )
+                if summary is None:
+                    self.completed_results = results
+                    self.failed_at_chapter = idx
+                    self.finished.emit(False, "")
+                    return
+
+                if self._abort:
+                    self.completed_results = results
+                    self.failed_at_chapter = idx
+                    self.log.emit("⛔  Aborted by user.", "warning")
+                    self.finished.emit(False, "")
+                    return
+
+                # ── step 2: rewrite in Spanish ────────────────────
+                self.log.emit(
+                    f"── Chapter {chunk_label}/{len(chapters)}: "
+                    f"rewriting in Spanish ({level}, creativity {creativity}/10)…",
+                    "info",
+                )
+                spanish = self._ollama_call(
+                    model,
+                    build_rewrite_prompt(summary, level, idx, creativity),
+                    label=f"Rewrite {chunk_label}",
+                    temperature=temperature,
+                )
+                if spanish is None:
+                    self.completed_results = results
+                    self.failed_at_chapter = idx
+                    self.finished.emit(False, "")
+                    return
+
+                spanish_parts.append(self._strip_asterisk_markers(spanish))
+
+            step += 2
+            self.progress.emit(step, total_steps)
+            results.append((f"Capítulo {idx + 1}", "\n\n".join(spanish_parts)))
+            self.completed_results = results[:]
             self.log.emit(f"✅  Chapter {idx + 1} done.", "success")
 
         # ── write output ──────────────────────────────────────
@@ -273,7 +323,33 @@ class ProcessingWorker(QThread):
 
         return out_path
 
-    # ── ollama helper ─────────────────────────────────────────
+    # ── text helpers ──────────────────────────────────────────
+    @staticmethod
+    def _split_into_chunks(text: str, max_words: int = 2000) -> list[str]:
+        """
+        Split *text* into chunks of at most *max_words* words, always
+        breaking at paragraph boundaries.  A paragraph is a block of text
+        separated by one or more blank lines.
+        """
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        chunks: list[str] = []
+        current: list[str] = []
+        current_words = 0
+
+        for para in paragraphs:
+            para_words = len(para.split())
+            if current and current_words + para_words > max_words:
+                chunks.append("\n\n".join(current))
+                current = []
+                current_words = 0
+            current.append(para)
+            current_words += para_words
+
+        if current:
+            chunks.append("\n\n".join(current))
+
+        return chunks or [text]
+
     @staticmethod
     def _strip_asterisk_markers(text: str) -> str:
         """Remove *word* / *phrase* markers the LLM adds around proper nouns."""
@@ -296,7 +372,7 @@ class ProcessingWorker(QThread):
             self.log.emit(
                 f"   ↳ Calling {model} (temp={temperature})…", "muted"
             )
-            with httpx.Client(timeout=OLLAMA_TIMEOUT) as client:
+            with httpx.Client(timeout=self._timeout) as client:
                 response = client.post(
                     "http://localhost:11434/api/generate",
                     json={

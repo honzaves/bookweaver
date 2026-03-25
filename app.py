@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +38,7 @@ from settings import (
     C_BORDER,
     C_MUTED,
     C_SURFACE,
+    OLLAMA_TIMEOUT,
     SETTINGS,
 )
 from widgets import (
@@ -59,6 +61,7 @@ class BookWeaverApp(QMainWindow):
         self.setMinimumSize(700, 820)
         self.resize(760, 900)
         self._worker: ProcessingWorker | None = None
+        self._resume_state: dict | None = None
         self._build_ui()
 
     # ──────────────────────────────────────────────────────────
@@ -247,6 +250,20 @@ class BookWeaverApp(QMainWindow):
         ol.addWidget(self._build_epub_meta_widget())
         self._fmt_epub.toggled.connect(self._epub_meta_widget.setVisible)
 
+        ol.addWidget(self._make_separator())
+
+        timeout_row = QHBoxLayout()
+        timeout_row.addWidget(QLabel("Timeout per call:"))
+        self._timeout_spin = QSpinBox()
+        self._timeout_spin.setRange(30, 3600)
+        self._timeout_spin.setSingleStep(30)
+        self._timeout_spin.setValue(OLLAMA_TIMEOUT)
+        self._timeout_spin.setSuffix("  s")
+        self._timeout_spin.setFixedWidth(110)
+        timeout_row.addWidget(self._timeout_spin)
+        timeout_row.addStretch()
+        ol.addLayout(timeout_row)
+
         form.addWidget(grp)
 
     def _build_epub_meta_widget(self) -> QWidget:
@@ -323,6 +340,11 @@ class BookWeaverApp(QMainWindow):
         self._abort_btn.clicked.connect(self._on_abort)
         btn_row.addWidget(self._abort_btn)
 
+        self._resume_btn = QPushButton("⏩  Resume")
+        self._resume_btn.setVisible(False)
+        self._resume_btn.clicked.connect(self._on_resume)
+        btn_row.addWidget(self._resume_btn)
+
         self._start_btn = QPushButton("▶  Start")
         self._start_btn.setObjectName("primary")
         self._start_btn.clicked.connect(self._on_start)
@@ -381,19 +403,32 @@ class BookWeaverApp(QMainWindow):
             "meta_creator": self._meta_creator.text().strip(),
             "meta_language": self._meta_language.text().strip() or "es",
             "meta_contributor": self._meta_contributor.text().strip(),
+            "timeout": self._timeout_spin.value(),
         }
 
     def _set_running(self, running: bool) -> None:
         self._start_btn.setEnabled(not running)
         self._abort_btn.setEnabled(running)
+        if running:
+            self._resume_btn.setVisible(False)
 
-    # ──────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────
     #  SLOTS
-    # ──────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────
+    def _start_worker(self, cfg: dict) -> None:
+        self._set_running(True)
+        self._worker = ProcessingWorker(cfg)
+        self._worker.log.connect(lambda msg, lvl: self._log.append_line(msg, lvl))
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.start()
+
     def _on_start(self) -> None:
         cfg = self._build_config()
         if cfg is None:
             return
+        self._resume_state = None
+        self._resume_btn.setVisible(False)
         self._log.clear()
         self._progress.reset()
         self._log.append_line(
@@ -402,14 +437,23 @@ class BookWeaverApp(QMainWindow):
             f"format={cfg['out_format']}  → {cfg['out_folder']}",
             "info",
         )
-        self._set_running(True)
-        self._worker = ProcessingWorker(cfg)
-        self._worker.log.connect(
-            lambda msg, lvl: self._log.append_line(msg, lvl)
+        self._start_worker(cfg)
+
+    def _on_resume(self) -> None:
+        if not self._resume_state:
+            return
+        cfg = {
+            **self._resume_state["config"],
+            "timeout": self._timeout_spin.value(),
+            "resume_from": self._resume_state["from_chapter"],
+            "prior_results": self._resume_state["results"],
+        }
+        self._log.append_line(
+            f"\n⏩  Resuming from chapter {self._resume_state['from_chapter'] + 1} "
+            f"with timeout={cfg['timeout']}s…",
+            "info",
         )
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.start()
+        self._start_worker(cfg)
 
     def _on_abort(self) -> None:
         if self._worker:
@@ -422,6 +466,8 @@ class BookWeaverApp(QMainWindow):
     def _on_finished(self, success: bool, path: str) -> None:
         self._set_running(False)
         if success:
+            self._resume_state = None
+            self._resume_btn.setVisible(False)
             self._progress.setMaximum(1)
             self._progress.setValue(1)
             self._log.append_line(f"\n🎉  All done!  Output: {path}", "success")
@@ -429,3 +475,18 @@ class BookWeaverApp(QMainWindow):
             self._log.append_line(
                 "\n❌  Processing failed. See messages above.", "error"
             )
+            # Offer resume if at least one chapter completed.
+            if self._worker and self._worker.completed_results:
+                self._resume_state = {
+                    "config": self._worker.config,
+                    "results": self._worker.completed_results,
+                    "from_chapter": self._worker.failed_at_chapter,
+                }
+                n = len(self._worker.completed_results)
+                self._log.append_line(
+                    f"💾  {n} chapter(s) saved. Adjust the timeout and press "
+                    f"Resume to continue from chapter "
+                    f"{self._worker.failed_at_chapter + 1}.",
+                    "warning",
+                )
+                self._resume_btn.setVisible(True)

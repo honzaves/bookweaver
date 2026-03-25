@@ -15,11 +15,14 @@ language level — all powered by a local [Ollama](https://ollama.com) model.
 | CEFR levels | B1 · B2 · C1 · C2 |
 | Condensation slider | Keep 10–90 % of each chapter; sweet spot highlighted at 30–50 % |
 | Creativity slider | 1–10 scale controlling LLM elaboration freedom and Ollama temperature |
+| Chapter chunking | Chapters over 2000 words are split at paragraph boundaries, processed in chunks, then rejoined |
 | Output format | Plain text (`.txt`) or EPUB (`.epub`) |
 | EPUB metadata | Title, Author, Language, Contributor — pre-filled from source file |
 | Output folder | Configurable; defaults to the same folder as the source file |
 | Proper noun rule | Character and place names are never translated |
 | First-chapter mode | Process only chapter 1 for fast prompt testing |
+| Timeout | Configurable per-run in the UI; default set in `bookweaver.json` |
+| Resume | After a timeout or failure, resume from the failed chapter with one click |
 | Abort | Cleanly stops after the current Ollama call |
 
 ---
@@ -62,7 +65,7 @@ bookweaver/
 ├── prompts.py           LLM prompt builders
 ├── widgets.py           Reusable custom Qt widgets
 ├── settings.py          Config loader — reads bookweaver.json, builds stylesheet
-├── bookweaver.json      All user-editable settings: colours and models
+├── bookweaver.json      All user-editable settings: colours, models, timeout
 ├── pyproject.toml       Project metadata and tool config
 ├── requirements.txt     Runtime dependencies
 ├── requirements-dev.txt Dev/test dependencies
@@ -90,12 +93,19 @@ Everything user-editable lives in `bookweaver.json`. No Python changes needed.
 }
 ```
 
-Restart the app and the new model appears in the dropdown.
-
 ### Changing colours
 
-Edit the `"colors"` block in `bookweaver.json`. All hex values are standard
-`#RRGGBB`. The stylesheet is rebuilt from these values on every launch.
+Edit the `"colors"` block. All values are standard `#RRGGBB` hex.
+
+### Changing the default timeout
+
+```json
+{
+  "ollama_timeout": 600
+}
+```
+
+The timeout can also be adjusted per-run in the UI without restarting.
 
 ### Tuning prompts
 
@@ -103,6 +113,24 @@ Open `prompts.py`. The two functions `build_summary_prompt` and
 `build_rewrite_prompt` contain all instructions sent to the LLM.
 The CEFR level guidance and creativity tier descriptions are plain
 string constants — edit them directly.
+
+---
+
+## Chapter chunking
+
+Chapters longer than 2000 words are automatically split at paragraph
+boundaries. Each chunk is summarised and rewritten independently, then
+the Spanish output is rejoined into a single chapter. The log shows
+progress as `Chapter 3.1/4`, `3.2/4` etc. when chunking is active.
+
+---
+
+## Resume after failure
+
+If a run fails mid-book (timeout, Ollama error, etc.), a **Resume** button
+appears in the UI. Any chapters already completed are preserved. Adjust the
+timeout spinbox if needed, then press Resume to continue from where it
+stopped — no work is repeated.
 
 ---
 
@@ -123,6 +151,7 @@ No Qt installation required — the test suite stubs out PyQt6.
 | Condensation | 30–50 % | Keeps core story, removes padding |
 | Creativity | 5–6 | Adds atmosphere without inventing events |
 | Model | `gemma3:27b` | Fast on Apple Silicon, good Spanish quality |
+| Timeout | 600 s | Enough for large chapters; increase for slow hardware |
 | First chapter only | ✅ on first run | Validate prompts cheaply before full run |
 
 ---

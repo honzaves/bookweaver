@@ -23,6 +23,68 @@ from settings import creativity_to_temperature
 
 
 # ──────────────────────────────────────────────────────────────
+#  _split_into_chunks
+# ──────────────────────────────────────────────────────────────
+class TestSplitIntoChunks:
+    def call(self, text, max_words=2000):
+        return ProcessingWorker._split_into_chunks(text, max_words)
+
+    def _para(self, n_words):
+        return " ".join(["word"] * n_words)
+
+    def test_short_text_returns_single_chunk(self):
+        text = self._para(100)
+        assert self.call(text) == [text]
+
+    def test_long_text_splits_into_multiple_chunks(self):
+        # 3 paragraphs of 800 words each → should split into 2 chunks at 2000 limit
+        paras = [self._para(800)] * 3
+        text = "\n\n".join(paras)
+        chunks = self.call(text, max_words=2000)
+        assert len(chunks) == 2
+
+    def test_no_chunk_exceeds_max_words_by_more_than_one_paragraph(self):
+        # Each paragraph is 300 words; limit 1000 words
+        paras = [self._para(300)] * 10
+        text = "\n\n".join(paras)
+        chunks = self.call(text, max_words=1000)
+        for chunk in chunks:
+            # A single paragraph (300w) may push a chunk over if it fills exactly,
+            # but no chunk should be more than one paragraph over the limit.
+            assert len(chunk.split()) <= 1300
+
+    def test_rejoining_chunks_preserves_all_words(self):
+        paras = [self._para(500)] * 6
+        text = "\n\n".join(paras)
+        chunks = self.call(text, max_words=1000)
+        rejoined_words = sum(len(c.split()) for c in chunks)
+        assert rejoined_words == len(text.split())
+
+    def test_empty_string_returns_single_chunk(self):
+        result = self.call("")
+        assert result == [""]
+
+    def test_exactly_max_words_stays_single_chunk(self):
+        text = self._para(2000)
+        chunks = self.call(text, max_words=2000)
+        assert len(chunks) == 1
+
+    def test_single_paragraph_larger_than_max_not_split(self):
+        # Can't split within a paragraph — it must be returned as-is
+        text = self._para(3000)
+        chunks = self.call(text, max_words=2000)
+        assert len(chunks) == 1
+        assert len(chunks[0].split()) == 3000
+
+    def test_blank_lines_stripped_from_paragraph_boundaries(self):
+        text = "para one\n\n\n\npara two"
+        chunks = self.call(text, max_words=2000)
+        assert len(chunks) == 1
+        assert "para one" in chunks[0]
+        assert "para two" in chunks[0]
+
+
+# ──────────────────────────────────────────────────────────────
 #  _strip_asterisk_markers
 # ──────────────────────────────────────────────────────────────
 class TestStripAsteriskMarkers:
