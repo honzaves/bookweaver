@@ -110,6 +110,41 @@ def build_summary_prompt(chapter_text: str, keep_pct: int) -> str:
     )
 
 
+def build_translation_prompt(
+    chunk_text: str,
+    level: str,
+    chapter_index: int,
+    creativity: int = 5,
+) -> str:
+    """
+    Return a prompt that asks the LLM to translate *chunk_text* directly
+    into Spanish at CEFR *level* with the given *creativity* (1–10).
+    No summarisation — the full source text is preserved.
+    """
+    guidance = _LEVEL_GUIDANCE.get(level, _LEVEL_GUIDANCE["B2"])
+    creativity_text = _creativity_instruction(creativity)
+
+    return (
+        "You are a skilled literary translator. Translate the following English "
+        "book chapter text into natural, fluent Spanish, preserving the full "
+        "content, structure, and meaning of the original.\\n\\n"
+        f"TARGET LEVEL: CEFR {level}\\n"
+        f"LANGUAGE GUIDANCE: {guidance}\\n\\n"
+        f"CREATIVITY LEVEL: {creativity}/10\\n"
+        f"CREATIVITY GUIDANCE: {creativity_text}\\n\\n"
+        "STRICT RULES:\\n"
+        "- Translate the COMPLETE text — do not shorten, summarise, or omit anything.\\n"
+        "- Write entirely in Spanish.\\n"
+        "- Do NOT translate proper nouns: keep all character names, place "
+        "names, and organisation names exactly as they appear in the source.\\n"
+        "- Do NOT add titles, headers, or meta-commentary. "
+        "Output only the translated text.\\n"
+        "- Match the paragraph and sentence structure of the original as closely as possible.\\n"
+        f"- This is chapter {chapter_index + 1}.\\n\\n"
+        f"SOURCE TEXT (English):\\n{chunk_text}\\n"
+    )
+
+
 def build_rewrite_prompt(
     summary: str,
     level: str,

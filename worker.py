@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from prompts import build_summary_prompt, build_rewrite_prompt
+from prompts import build_summary_prompt, build_rewrite_prompt, build_translation_prompt
 from settings import creativity_to_temperature, OLLAMA_TIMEOUT
 
 
@@ -47,6 +47,7 @@ class ProcessingWorker(QThread):
         self.config = config
         self._abort = False
         self._timeout = config.get("timeout", OLLAMA_TIMEOUT)
+        self._chunk_size = config.get("chunk_size", 2000)
         # Populated during run(); readable by the app after finished(False).
         self.completed_results: list[tuple[str, str]] = []
         self.failed_at_chapter: int = 0
@@ -84,6 +85,7 @@ class ProcessingWorker(QThread):
         )
         creativity = cfg["creativity"]
         temperature = creativity_to_temperature(creativity)
+        mode = cfg.get("mode", "summarise_rewrite")  # or "translate"
         resume_from = cfg.get("resume_from", 0)
         meta = {
             "title": cfg.get("meta_title") or Path(epub_path).stem,
@@ -118,10 +120,11 @@ class ProcessingWorker(QThread):
             chapters = chapters[:1]
             self.log.emit("ℹ️   Processing first chapter only.", "info")
 
-        total_steps = len(chapters) * 2
+        steps_per_chapter = 1 if mode == "translate" else 2
+        total_steps = len(chapters) * steps_per_chapter
         # Seed results and progress from any previously completed chapters.
         results: list[tuple[str, str]] = list(cfg.get("prior_results", []))
-        step = resume_from * 2
+        step = resume_from * steps_per_chapter
 
         if resume_from > 0:
             self.log.emit(
@@ -144,12 +147,12 @@ class ProcessingWorker(QThread):
                 self.finished.emit(False, "")
                 return
 
-            chunks = self._split_into_chunks(text)
+            chunks = self._split_into_chunks(text, self._chunk_size)
             n_chunks = len(chunks)
             if n_chunks > 1:
                 self.log.emit(
                     f"\n── Chapter {idx + 1}/{len(chapters)}: "
-                    f"split into {n_chunks} chunks (~2000 words each).", "info"
+                    f"split into {n_chunks} chunks (~{self._chunk_size} words each).", "info"
                 )
 
             spanish_parts: list[str] = []
@@ -167,50 +170,70 @@ class ProcessingWorker(QThread):
                     self.finished.emit(False, "")
                     return
 
-                # ── step 1: summarise ─────────────────────────────
-                self.log.emit(
-                    f"\n── Chapter {chunk_label}/{len(chapters)}: summarising…", "info"
-                )
-                summary = self._ollama_call(
-                    model,
-                    build_summary_prompt(chunk, keep_pct),
-                    label=f"Summary {chunk_label}",
-                    temperature=temperature,
-                )
-                if summary is None:
-                    self.completed_results = results
-                    self.failed_at_chapter = idx
-                    self.finished.emit(False, "")
-                    return
+                if mode == "translate":
+                    # ── Translation-only: one LLM call per chunk ──────────
+                    self.log.emit(
+                        f"\n── Chapter {chunk_label}/{len(chapters)}: translating…", "info"
+                    )
+                    spanish = self._ollama_call(
+                        model,
+                        build_translation_prompt(chunk, level, idx, creativity),
+                        label=f"Translate {chunk_label}",
+                        temperature=temperature,
+                    )
+                    if spanish is None:
+                        self.completed_results = results
+                        self.failed_at_chapter = idx
+                        self.finished.emit(False, "")
+                        return
+                    spanish_parts.append(self._strip_asterisk_markers(spanish))
 
-                if self._abort:
-                    self.completed_results = results
-                    self.failed_at_chapter = idx
-                    self.log.emit("⛔  Aborted by user.", "warning")
-                    self.finished.emit(False, "")
-                    return
+                else:
+                    # ── Summarise → Rewrite (original two-step pipeline) ──
+                    # ── step 1: summarise ─────────────────────────────
+                    self.log.emit(
+                        f"\n── Chapter {chunk_label}/{len(chapters)}: summarising…", "info"
+                    )
+                    summary = self._ollama_call(
+                        model,
+                        build_summary_prompt(chunk, keep_pct),
+                        label=f"Summary {chunk_label}",
+                        temperature=temperature,
+                    )
+                    if summary is None:
+                        self.completed_results = results
+                        self.failed_at_chapter = idx
+                        self.finished.emit(False, "")
+                        return
 
-                # ── step 2: rewrite in Spanish ────────────────────
-                self.log.emit(
-                    f"── Chapter {chunk_label}/{len(chapters)}: "
-                    f"rewriting in Spanish ({level}, creativity {creativity}/10)…",
-                    "info",
-                )
-                spanish = self._ollama_call(
-                    model,
-                    build_rewrite_prompt(summary, level, idx, creativity),
-                    label=f"Rewrite {chunk_label}",
-                    temperature=temperature,
-                )
-                if spanish is None:
-                    self.completed_results = results
-                    self.failed_at_chapter = idx
-                    self.finished.emit(False, "")
-                    return
+                    if self._abort:
+                        self.completed_results = results
+                        self.failed_at_chapter = idx
+                        self.log.emit("⛔  Aborted by user.", "warning")
+                        self.finished.emit(False, "")
+                        return
 
-                spanish_parts.append(self._strip_asterisk_markers(spanish))
+                    # ── step 2: rewrite in Spanish ────────────────────
+                    self.log.emit(
+                        f"── Chapter {chunk_label}/{len(chapters)}: "
+                        f"rewriting in Spanish ({level}, creativity {creativity}/10)…",
+                        "info",
+                    )
+                    spanish = self._ollama_call(
+                        model,
+                        build_rewrite_prompt(summary, level, idx, creativity),
+                        label=f"Rewrite {chunk_label}",
+                        temperature=temperature,
+                    )
+                    if spanish is None:
+                        self.completed_results = results
+                        self.failed_at_chapter = idx
+                        self.finished.emit(False, "")
+                        return
 
-            step += 2
+                    spanish_parts.append(self._strip_asterisk_markers(spanish))
+
+            step += steps_per_chapter
             self.progress.emit(step, total_steps)
             results.append((f"Capítulo {idx + 1}", "\n\n".join(spanish_parts)))
             self.completed_results = results[:]

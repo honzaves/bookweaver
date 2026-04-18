@@ -4,12 +4,17 @@
 
 ## What this project does
 
-BookWeaver is a PyQt6 desktop app.  
-It reads an English EPUB, condenses each chapter via Ollama, then
-rewrites it in Spanish at a chosen CEFR level.
+BookWeaver is a PyQt6 desktop app.
+It reads an English EPUB and produces a Spanish version via Ollama, using one
+of two processing modes:
 
-Chapters longer than 2000 words are split at paragraph boundaries,
-processed in chunks, and rejoined after translation.
+- **Summarise → Rewrite** — condenses each chapter to a target length (via
+  `build_summary_prompt`), then rewrites it in Spanish (via `build_rewrite_prompt`).
+- **Full translation** — translates each chapter chunk directly into Spanish
+  (via `build_translation_prompt`), preserving the full source text.
+
+Chapters longer than the configured chunk size are split at paragraph
+boundaries, processed independently, and rejoined.
 
 ---
 
@@ -29,15 +34,15 @@ processed in chunks, and rejoined after translation.
 
 ## Architecture rules
 
-1. **Imports flow one way:**  
-   `main` → `app` → `worker`, `widgets`, `settings`  
-   `worker` → `prompts`, `settings`  
-   `widgets` → `settings`  
-   `prompts` → nothing  
-   `settings` → nothing (stdlib only)  
+1. **Imports flow one way:**
+   `main` → `app` → `worker`, `widgets`, `settings`
+   `worker` → `prompts`, `settings`
+   `widgets` → `settings`
+   `prompts` → nothing
+   `settings` → nothing (stdlib only)
    Never import `app` or `worker` from `widgets` or `settings`.
 
-2. **All colours come from `bookweaver.json` via `settings.py`.**  
+2. **All colours come from `bookweaver.json` via `settings.py`.**
    Never hardcode hex values anywhere else.
 
 3. **`SETTINGS` and `OLLAMA_TIMEOUT` are module-level globals in `settings.py`**,
@@ -70,16 +75,37 @@ All user-editable values live in `bookweaver.json`:
 
 ## Pipeline
 
-For each chapter:
+### Config keys relevant to the pipeline
 
-1. **Chunk** — if the chapter exceeds 2000 words, `_split_into_chunks()` splits
-   it at paragraph boundaries into chunks of ≤2000 words.
-2. **Summarise** — each chunk is condensed via `build_summary_prompt()`.
-   The prompt uses a concrete word-count target (not a percentage framing)
-   to avoid LLMs producing shorter output than requested.
-3. **Rewrite** — each condensed chunk is rewritten in Spanish via
-   `build_rewrite_prompt()`.
-4. **Rejoin** — Spanish chunks are joined with `\n\n` into a single chapter result.
+| Key | Type | Description |
+|---|---|---|
+| `mode` | `str` | `"summarise_rewrite"` (default) or `"translate"` |
+| `chunk_size` | `int` | Max words per chunk (default 2 000) |
+| `keep_pct` | `int` | Condensation % — used only in `summarise_rewrite` mode |
+| `creativity` | `int` | 1–10 scale; controls temperature and prose directives |
+| `level` | `str` | CEFR level: `"B1"`, `"B2"`, `"C1"`, or `"C2"` |
+
+### Per chapter
+
+1. **Chunk** — if the chapter exceeds `chunk_size` words, `_split_into_chunks()`
+   splits it at paragraph boundaries into chunks of at most `chunk_size` words.
+
+2. **Process each chunk** — branched by `mode`:
+
+   - **`summarise_rewrite`** (two LLM calls per chunk):
+     - `build_summary_prompt(chunk, keep_pct)` → condensed English
+     - `build_rewrite_prompt(summary, level, idx, creativity)` → Spanish chapter text
+
+   - **`translate`** (one LLM call per chunk):
+     - `build_translation_prompt(chunk, level, idx, creativity)` → Spanish chapter text
+
+3. **Rejoin** — Spanish chunks are joined with `\n\n` into a single chapter result.
+
+### Progress bar
+
+`total_steps = len(chapters) * steps_per_chapter`
+where `steps_per_chapter` is **2** in `summarise_rewrite` mode and **1** in
+`translate` mode. This keeps the progress bar accurate regardless of mode.
 
 The log shows `Chapter 3.1/4`, `3.2/4` etc. when chunking is active.
 
@@ -93,9 +119,9 @@ The log shows `Chapter 3.1/4`, `3.2/4` etc. when chunking is active.
 
 On `finished(False)`, if `completed_results` is non-empty, `BookWeaverApp`
 stores a `_resume_state` dict and shows a **Resume** button. Pressing it
-creates a new worker with `resume_from` and `prior_results` injected into
-the config dict. The chapter loop skips already-done chapters and seeds
-`results` with the prior work.
+creates a new worker with `resume_from`, `prior_results`, `timeout`, and
+`chunk_size` injected into the config dict. The chapter loop skips
+already-done chapters and seeds `results` with the prior work.
 
 ---
 
@@ -103,11 +129,13 @@ the config dict. The chapter loop skips already-done chapters and seeds
 
 `_ollama_call` uses `self._timeout`, set from `config["timeout"]` (UI spinbox
 value) falling back to `OLLAMA_TIMEOUT` from `bookweaver.json`.
-The default is 600 seconds — large chapters processed at high `keep_pct`
-generate many tokens and need generous timeouts.
+The default is 1 200 seconds.
 
 **`_ollama_call` has no default for `temperature`** — it must always be passed
 explicitly. This is intentional to prevent silent wrong values.
+
+Full translation mode generates more tokens than the summarise pipeline and
+may require a higher timeout, especially for large chapters.
 
 ---
 
@@ -150,14 +178,19 @@ pytest -q        # quiet output
 Tested modules: `prompts.py`, `settings.py`, `worker.py` (pure functions and
 file I/O). The Qt pipeline and full Ollama integration are not unit-tested.
 
+One pre-existing failure exists in `test_settings.py::TestOllamaTimeout::test_defaults_when_missing`
+— the test asserts a default of `600` but `settings.py` has always defaulted
+to `1200`. This is not related to any recent changes.
+
 ---
 
 ## Adding a new UI control
 
 1. Add the widget to `widgets.py` if reusable, or inline in `app.py`.
 2. Add the field to `_build_config()` in `app.py`.
-3. Extract the value in `worker.py`'s `run()` method.
-4. Pass it to the appropriate prompt builder in `prompts.py` if relevant.
+3. Pass it through in the resume config block in `_on_resume()` if it should be re-applied on resume.
+4. Extract the value in `worker.py`'s `run()` method.
+5. Pass it to the appropriate prompt builder in `prompts.py` if relevant.
 
 ---
 
@@ -169,14 +202,26 @@ file I/O). The Qt pipeline and full Ollama integration are not unit-tested.
 
 ---
 
+## Adding a new processing mode
+
+1. Add a radio button to the Processing mode group in `app.py → _add_summarisation_group()`.
+2. Wire any show/hide logic to `_on_mode_changed()` in `app.py`.
+3. Add the mode string to `_build_config()`.
+4. Add the prompt builder function to `prompts.py`.
+5. Add the branch inside the chunk loop in `worker.py → run()`.
+6. Adjust `steps_per_chapter` in `worker.py` if the number of LLM calls per chunk differs.
+
+---
+
 ## Prompt tuning
 
 All LLM instructions live in `prompts.py`:
 
-- `_LEVEL_GUIDANCE` — per-CEFR-level Spanish writing instructions
-- `_creativity_instruction()` — maps creativity 1–10 to prose directives
-- `build_summary_prompt()` — condensation prompt (word-count-target driven)
-- `build_rewrite_prompt()` — Spanish rewrite prompt
+- `_LEVEL_GUIDANCE` — per-CEFR-level Spanish writing instructions (shared by all modes)
+- `_creativity_instruction()` — maps creativity 1–10 to prose directives (shared by all modes)
+- `build_summary_prompt()` — condensation prompt (word-count-target driven); used by summarise → rewrite only
+- `build_rewrite_prompt()` — Spanish rewrite prompt; used by summarise → rewrite only
+- `build_translation_prompt()` — direct translation prompt; used by full translation mode only
 
 **Important:** `build_summary_prompt` frames the task as "condense to N words"
 rather than "summarise" — LLMs treat "summarise" as a signal to produce short

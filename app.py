@@ -183,8 +183,28 @@ class BookWeaverApp(QMainWindow):
         form.addWidget(grp)
 
     def _add_summarisation_group(self, form: QVBoxLayout) -> None:
-        grp = QGroupBox("Summarisation depth")
+        grp = QGroupBox("Processing mode")
         sl = QVBoxLayout(grp)
+
+        # ── mode radio buttons ──
+        mode_row = QHBoxLayout()
+        self._mode_group = QButtonGroup(self)
+        self._mode_summarise = QRadioButton("Summarise → Rewrite in Spanish")
+        self._mode_translate = QRadioButton("Full translation (no summarisation)")
+        self._mode_summarise.setChecked(True)
+        self._mode_group.addButton(self._mode_summarise)
+        self._mode_group.addButton(self._mode_translate)
+        mode_row.addWidget(self._mode_summarise)
+        mode_row.addWidget(self._mode_translate)
+        mode_row.addStretch()
+        sl.addLayout(mode_row)
+
+        sl.addSpacing(4)
+
+        # ── summarisation depth (hidden in translate mode) ──
+        self._summarisation_widget = QWidget()
+        sw = QVBoxLayout(self._summarisation_widget)
+        sw.setContentsMargins(0, 0, 0, 0)
         info = QLabel(
             "Controls how much of each chapter is retained before Spanish "
             "rewriting. Lower % = shorter, punchier output. "
@@ -192,10 +212,25 @@ class BookWeaverApp(QMainWindow):
         )
         info.setObjectName("muted")
         info.setWordWrap(True)
-        sl.addWidget(info)
-        sl.addSpacing(6)
+        sw.addWidget(info)
+        sw.addSpacing(6)
         self._slider = SummarizationSlider()
-        sl.addWidget(self._slider)
+        sw.addWidget(self._slider)
+        sl.addWidget(self._summarisation_widget)
+
+        # translate mode note
+        self._translate_note = QLabel(
+            "The full chapter text will be translated directly — "
+            "nothing is cut or condensed. Expect longer LLM calls."
+        )
+        self._translate_note.setObjectName("muted")
+        self._translate_note.setWordWrap(True)
+        self._translate_note.setVisible(False)
+        sl.addWidget(self._translate_note)
+
+        # wire toggle
+        self._mode_translate.toggled.connect(self._on_mode_changed)
+
         form.addWidget(grp)
 
     def _add_creativity_group(self, form: QVBoxLayout) -> None:
@@ -263,6 +298,18 @@ class BookWeaverApp(QMainWindow):
         timeout_row.addWidget(self._timeout_spin)
         timeout_row.addStretch()
         ol.addLayout(timeout_row)
+
+        chunk_row = QHBoxLayout()
+        chunk_row.addWidget(QLabel("Chunk size:"))
+        self._chunk_spin = QSpinBox()
+        self._chunk_spin.setRange(200, 10000)
+        self._chunk_spin.setSingleStep(100)
+        self._chunk_spin.setValue(2000)
+        self._chunk_spin.setSuffix("  words")
+        self._chunk_spin.setFixedWidth(150)
+        chunk_row.addWidget(self._chunk_spin)
+        chunk_row.addStretch()
+        ol.addLayout(chunk_row)
 
         form.addWidget(grp)
 
@@ -390,6 +437,7 @@ class BookWeaverApp(QMainWindow):
             return None
         out_fmt = "txt" if self._fmt_txt.isChecked() else "epub"
         out_folder = self._out_folder.path() or str(Path(path).parent)
+        mode = "translate" if self._mode_translate.isChecked() else "summarise_rewrite"
         return {
             "epub_path": path,
             "level": self._level_combo.currentData(),
@@ -399,12 +447,19 @@ class BookWeaverApp(QMainWindow):
             "out_format": out_fmt,
             "out_folder": out_folder,
             "creativity": self._creativity_slider.value(),
+            "mode": mode,
+            "chunk_size": self._chunk_spin.value(),
             "meta_title": self._meta_title.text().strip(),
             "meta_creator": self._meta_creator.text().strip(),
             "meta_language": self._meta_language.text().strip() or "es",
             "meta_contributor": self._meta_contributor.text().strip(),
             "timeout": self._timeout_spin.value(),
         }
+
+    def _on_mode_changed(self, translate: bool) -> None:
+        """Show/hide summarisation depth controls based on selected mode."""
+        self._summarisation_widget.setVisible(not translate)
+        self._translate_note.setVisible(translate)
 
     def _set_running(self, running: bool) -> None:
         self._start_btn.setEnabled(not running)
@@ -433,7 +488,8 @@ class BookWeaverApp(QMainWindow):
         self._progress.reset()
         self._log.append_line(
             f"Starting: model={cfg['model']}  level={cfg['level']}  "
-            f"keep={cfg['keep_pct']}%  creativity={cfg['creativity']}/10  "
+            f"mode={cfg['mode']}  chunk={cfg['chunk_size']}w  "
+            f"creativity={cfg['creativity']}/10  "
             f"format={cfg['out_format']}  → {cfg['out_folder']}",
             "info",
         )
@@ -445,6 +501,7 @@ class BookWeaverApp(QMainWindow):
         cfg = {
             **self._resume_state["config"],
             "timeout": self._timeout_spin.value(),
+            "chunk_size": self._chunk_spin.value(),
             "resume_from": self._resume_state["from_chapter"],
             "prior_results": self._resume_state["results"],
         }
