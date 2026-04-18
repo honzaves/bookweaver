@@ -244,7 +244,7 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
         "default_model": cfg["default_model"],
     }
 
-    OLLAMA_TIMEOUT = int(cfg.get("ollama_timeout", 600))
+    OLLAMA_TIMEOUT = int(cfg.get("ollama_timeout", 1200))
 
 
 # Initialise module-level constants from the default config path.

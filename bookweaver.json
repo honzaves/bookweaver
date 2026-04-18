@@ -1,7 +1,7 @@
 {
   "_comment": "BookWeaver config — edit colours and models here. No code changes needed.",
 
-  "ollama_timeout": 600,
+  "ollama_timeout": 1200,
 
   "colors": {
     "bg":        "#111210",
@@ -19,7 +19,8 @@
   },
 
   "models": [
-    { "label": "Gemma 3 27B  (recommended)", "value": "gemma3:27b"   },
+    { "label": "Gemma 4 31B  (recommended)", "value": "gemma4:31b"   },
+    { "label": "Gemma 3 27B  (2nd recommended)", "value": "gemma3:27b"   },
     { "label": "Llama 3.3 70B",              "value": "llama3.3:70b" },
     { "label": "Mistral 7B",                 "value": "mistral:7b"   },
     { "label": "Qwen 2.5 14B",               "value": "qwen2.5:14b"  },
