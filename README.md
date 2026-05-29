@@ -1,9 +1,8 @@
 # BookWeaver
 
-**BookWeaver** is a desktop app that takes an English EPUB and produces a
-Spanish version of it — all powered by a local [Ollama](https://ollama.com) model.
-
-Two processing modes are available:
+**BookWeaver** is a desktop app that takes an English EPUB and processes it
+via a local [Ollama](https://ollama.com) model. Three processing modes are
+available:
 
 - **Summarise → Rewrite** — condenses each chapter to a chosen length, then
   rewrites it in Spanish at a target CEFR level. Good for creating a shorter,
@@ -11,8 +10,11 @@ Two processing modes are available:
 - **Full translation** — translates the complete text directly, preserving
   every sentence and paragraph. Good when you want an accurate Spanish
   rendition rather than a condensed retelling.
+- **Summarise only** — condenses each chapter to the target length and saves
+  the result as English text. Good for producing abridged English versions or
+  quickly reviewing a book's content.
 
-Both modes use the same creativity and CEFR-level controls, and both support
+All modes use the same creativity and CEFR-level controls, and all support
 chapter chunking, resume-after-failure, and all output formats.
 
 ---
@@ -24,12 +26,12 @@ chapter chunking, resume-after-failure, and all output formats.
 | EPUB source | File picker filtered to `.epub` files |
 | Model selection | Dropdown loaded from `bookweaver.json` — no code changes to add models |
 | CEFR levels | B1 · B2 · C1 · C2 |
-| Processing mode | **Summarise → Rewrite** (condense then rewrite) or **Full translation** (direct, no cuts) |
-| Condensation slider | Keep 10–90 % of each chapter; visible only in Summarise → Rewrite mode |
+| Processing mode | **Summarise → Rewrite**, **Full translation**, or **Summarise only** (English, no translation) |
+| Condensation slider | Keep 10–90 % of each chapter; visible in Summarise → Rewrite and Summarise only modes |
 | Creativity slider | 1–10 scale controlling LLM elaboration freedom and Ollama temperature |
 | Chapter chunking | Long chapters are split at paragraph boundaries into configurable-size chunks, processed independently, then rejoined |
 | Chunk size | Configurable in the UI (200–10 000 words; default 2 000) |
-| Output format | Plain text (`.txt`) or EPUB (`.epub`) |
+| Output format | Plain text (`.txt`), EPUB (`.epub`), and/or HTML (`.html`) — select one or more |
 | EPUB metadata | Title, Author, Language, Contributor — pre-filled from source file |
 | Output folder | Configurable; defaults to the same folder as the source file |
 | Proper noun rule | Character and place names are never translated |
@@ -127,7 +129,7 @@ sent to the LLM:
 
 | Function | Used by |
 |---|---|
-| `build_summary_prompt` | Summarise → Rewrite mode, step 1 |
+| `build_summary_prompt` | Summarise → Rewrite (step 1) and Summarise only |
 | `build_rewrite_prompt` | Summarise → Rewrite mode, step 2 |
 | `build_translation_prompt` | Full translation mode |
 
@@ -161,6 +163,16 @@ Good for: faithful Spanish versions; readers who want the full story.
 
 > **Note:** full translation produces significantly longer output and therefore
 > takes more time and tokens per chapter than the summarise pipeline.
+
+### Summarise only
+
+Each chapter chunk goes through a single LLM call:
+
+1. **Summarise** — condenses the chunk to the target word count set by the
+   condensation slider. Output is saved as English text — no translation step.
+
+Good for: producing abridged English versions; skimming a long book before
+deciding to translate it; prompt development and testing.
 
 ---
 
@@ -202,13 +214,13 @@ No Qt installation required — the test suite stubs out PyQt6.
 
 ### Summarise → Rewrite mode
 
-| Setting | Value | Why |
-|---|---|---|
-| Condensation | 30–50 % | Keeps core story, removes padding |
-| Creativity | 5–6 | Adds atmosphere without inventing events |
-| Chunk size | 2 000 words | Safe default for most models |
-| Model | `gemma3:27b` | Fast on Apple Silicon, good Spanish quality |
-| Timeout | 900 s | Enough for large chapters at moderate keep % |
+| Setting | Value          | Why |
+|---|----------------|---|
+| Condensation | 30–50 %        | Keeps core story, removes padding |
+| Creativity | 5–6            | Adds atmosphere without inventing events |
+| Chunk size | 2 000 words    | Safe default for most models |
+| Model | `gemma4:31b`   | Fast on Apple Silicon, good Spanish quality |
+| Timeout | 900 s          | Enough for large chapters at moderate keep % |
 | First chapter only | ✅ on first run | Validate prompts cheaply before full run |
 
 ### Full translation mode
@@ -218,6 +230,14 @@ No Qt installation required — the test suite stubs out PyQt6.
 | Creativity | 3–5 | Stay close to source; lower creativity = more literal |
 | Chunk size | 1 000–1 500 words | Smaller chunks reduce timeout risk on long chapters |
 | Timeout | 1 200 s | Translation generates more tokens than a condensed rewrite |
+
+### Summarise only mode
+
+| Setting | Value | Why |
+|---|---|---|
+| Condensation | 20–40 % | Produces a compact English summary |
+| Chunk size | 2 000 words | Default is fine; output is short regardless |
+| Timeout | 600 s | Summarisation generates far fewer tokens than translation |
 
 ---
 

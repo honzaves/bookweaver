@@ -155,7 +155,7 @@ class BookWeaverApp(QMainWindow):
         col1 = QVBoxLayout()
         col1.addWidget(QLabel("Ollama model:"))
         self._model_combo = QComboBox()
-        default_val = SETTINGS.get("default_model", "gemma3:27b")
+        default_val = SETTINGS.get("default_model", "gemma4:31b")
         default_idx = 0
         for i, entry in enumerate(SETTINGS.get("models", [])):
             self._model_combo.addItem(entry["label"], userData=entry["value"])
@@ -191,11 +191,14 @@ class BookWeaverApp(QMainWindow):
         self._mode_group = QButtonGroup(self)
         self._mode_summarise = QRadioButton("Summarise → Rewrite in Spanish")
         self._mode_translate = QRadioButton("Full translation (no summarisation)")
+        self._mode_summarise_only = QRadioButton("Summarise only  (English, no translation)")
         self._mode_summarise.setChecked(True)
         self._mode_group.addButton(self._mode_summarise)
         self._mode_group.addButton(self._mode_translate)
+        self._mode_group.addButton(self._mode_summarise_only)
         mode_row.addWidget(self._mode_summarise)
         mode_row.addWidget(self._mode_translate)
+        mode_row.addWidget(self._mode_summarise_only)
         mode_row.addStretch()
         sl.addLayout(mode_row)
 
@@ -206,8 +209,8 @@ class BookWeaverApp(QMainWindow):
         sw = QVBoxLayout(self._summarisation_widget)
         sw.setContentsMargins(0, 0, 0, 0)
         info = QLabel(
-            "Controls how much of each chapter is retained before Spanish "
-            "rewriting. Lower % = shorter, punchier output. "
+            "Controls how much of each chapter is condensed. "
+            "Lower % = shorter, punchier output. "
             "Higher % = more faithful to source."
         )
         info.setObjectName("muted")
@@ -228,8 +231,19 @@ class BookWeaverApp(QMainWindow):
         self._translate_note.setVisible(False)
         sl.addWidget(self._translate_note)
 
-        # wire toggle
-        self._mode_translate.toggled.connect(self._on_mode_changed)
+        # summarise-only mode note
+        self._summarise_only_note = QLabel(
+            "Each chapter will be condensed to the target length and saved "
+            "as English text — no translation is performed."
+        )
+        self._summarise_only_note.setObjectName("muted")
+        self._summarise_only_note.setWordWrap(True)
+        self._summarise_only_note.setVisible(False)
+        sl.addWidget(self._summarise_only_note)
+
+        # wire toggles
+        for btn in (self._mode_summarise, self._mode_translate, self._mode_summarise_only):
+            btn.toggled.connect(lambda _: self._on_mode_changed())
 
         form.addWidget(grp)
 
@@ -262,16 +276,15 @@ class BookWeaverApp(QMainWindow):
 
         ol.addWidget(self._make_separator())
 
-        ol.addWidget(QLabel("Output format:"))
+        ol.addWidget(QLabel("Output format  (select one or more):"))
         fmt_row = QHBoxLayout()
-        self._fmt_group = QButtonGroup(self)
-        self._fmt_txt = QRadioButton("Plain text  (.txt)")
-        self._fmt_epub = QRadioButton("EPUB  (.epub)")
+        self._fmt_txt = QCheckBox("Plain text  (.txt)")
+        self._fmt_epub = QCheckBox("EPUB  (.epub)")
+        self._fmt_html = QCheckBox("HTML  (.html)")
         self._fmt_txt.setChecked(True)
-        self._fmt_group.addButton(self._fmt_txt)
-        self._fmt_group.addButton(self._fmt_epub)
         fmt_row.addWidget(self._fmt_txt)
         fmt_row.addWidget(self._fmt_epub)
+        fmt_row.addWidget(self._fmt_html)
         fmt_row.addStretch()
         ol.addLayout(fmt_row)
 
@@ -435,9 +448,23 @@ class BookWeaverApp(QMainWindow):
                 "Please select an EPUB file first.", "warning"
             )
             return None
-        out_fmt = "txt" if self._fmt_txt.isChecked() else "epub"
+        out_fmt = [
+            fmt for fmt, chk in [
+                ("txt", self._fmt_txt),
+                ("epub", self._fmt_epub),
+                ("html", self._fmt_html),
+            ] if chk.isChecked()
+        ]
+        if not out_fmt:
+            self._log.append_line("Please select at least one output format.", "warning")
+            return None
         out_folder = self._out_folder.path() or str(Path(path).parent)
-        mode = "translate" if self._mode_translate.isChecked() else "summarise_rewrite"
+        if self._mode_translate.isChecked():
+            mode = "translate"
+        elif self._mode_summarise_only.isChecked():
+            mode = "summarise_only"
+        else:
+            mode = "summarise_rewrite"
         return {
             "epub_path": path,
             "level": self._level_combo.currentData(),
@@ -456,10 +483,13 @@ class BookWeaverApp(QMainWindow):
             "timeout": self._timeout_spin.value(),
         }
 
-    def _on_mode_changed(self, translate: bool) -> None:
-        """Show/hide summarisation depth controls based on selected mode."""
+    def _on_mode_changed(self) -> None:
+        """Show/hide controls based on selected processing mode."""
+        translate = self._mode_translate.isChecked()
+        summarise_only = self._mode_summarise_only.isChecked()
         self._summarisation_widget.setVisible(not translate)
         self._translate_note.setVisible(translate)
+        self._summarise_only_note.setVisible(summarise_only)
 
     def _set_running(self, running: bool) -> None:
         self._start_btn.setEnabled(not running)

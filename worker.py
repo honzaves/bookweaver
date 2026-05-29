@@ -120,7 +120,7 @@ class ProcessingWorker(QThread):
             chapters = chapters[:1]
             self.log.emit("ℹ️   Processing first chapter only.", "info")
 
-        steps_per_chapter = 1 if mode == "translate" else 2
+        steps_per_chapter = 1 if mode in ("translate", "summarise_only") else 2
         total_steps = len(chapters) * steps_per_chapter
         # Seed results and progress from any previously completed chapters.
         results: list[tuple[str, str]] = list(cfg.get("prior_results", []))
@@ -188,6 +188,24 @@ class ProcessingWorker(QThread):
                         return
                     spanish_parts.append(self._strip_asterisk_markers(spanish))
 
+                elif mode == "summarise_only":
+                    # ── Summarise-only: condense to English, no rewrite ───
+                    self.log.emit(
+                        f"\n── Chapter {chunk_label}/{len(chapters)}: summarising…", "info"
+                    )
+                    summary = self._ollama_call(
+                        model,
+                        build_summary_prompt(chunk, keep_pct),
+                        label=f"Summary {chunk_label}",
+                        temperature=temperature,
+                    )
+                    if summary is None:
+                        self.completed_results = results
+                        self.failed_at_chapter = idx
+                        self.finished.emit(False, "")
+                        return
+                    spanish_parts.append(summary)
+
                 else:
                     # ── Summarise → Rewrite (original two-step pipeline) ──
                     # ── step 1: summarise ─────────────────────────────
@@ -235,22 +253,35 @@ class ProcessingWorker(QThread):
 
             step += steps_per_chapter
             self.progress.emit(step, total_steps)
-            results.append((f"Capítulo {idx + 1}", "\n\n".join(spanish_parts)))
+            ch_title = f"Chapter {idx + 1}" if mode == "summarise_only" else f"Capítulo {idx + 1}"
+            results.append((ch_title, "\n\n".join(spanish_parts)))
             self.completed_results = results[:]
             self.log.emit(f"✅  Chapter {idx + 1} done.", "success")
 
         # ── write output ──────────────────────────────────────
         out_folder.mkdir(parents=True, exist_ok=True)
         stem = Path(epub_path).stem
+        lang_label = "English summary" if mode == "summarise_only" else f"Spanish {level}"
+        out_formats = out_format if isinstance(out_format, list) else [out_format]
+        out_paths = []
 
-        if out_format == "txt":
-            out_path = self._write_txt(results, out_folder, stem, level, meta)
-        else:
-            out_path = self._write_epub(
-                results, out_folder, stem, level, meta, ebooklib_epub
-            )
+        for fmt in out_formats:
+            if fmt == "txt":
+                out_paths.append(
+                    self._write_txt(results, out_folder, stem, level, meta, lang_label)
+                )
+            elif fmt == "epub":
+                out_paths.append(
+                    self._write_epub(
+                        results, out_folder, stem, level, meta, ebooklib_epub, lang_label
+                    )
+                )
+            elif fmt == "html":
+                out_paths.append(
+                    self._write_html(results, out_folder, stem, level, meta, lang_label)
+                )
 
-        self.finished.emit(True, str(out_path))
+        self.finished.emit(True, ", ".join(str(p) for p in out_paths))
 
     # ── output writers ────────────────────────────────────────
     def _write_txt(
@@ -260,6 +291,7 @@ class ProcessingWorker(QThread):
         stem: str,
         level: str,
         meta: dict,
+        lang_label: str = "",
     ) -> Path:
         out_path = out_folder / f"{stem}_ES_{level}.txt"
         with open(out_path, "w", encoding="utf-8") as fh:
@@ -267,7 +299,7 @@ class ProcessingWorker(QThread):
                 fh.write(f"{meta['title']}\n")
             if meta["creator"]:
                 fh.write(f"by {meta['creator']}\n")
-            fh.write(f"Spanish ({level})\n{'─' * 60}\n\n")
+            fh.write(f"{lang_label or f'Spanish ({level})'}\n{'─' * 60}\n\n")
             for title, body in results:
                 fh.write(f"\n{'=' * 60}\n{title}\n{'=' * 60}\n\n{body}\n\n")
         self.log.emit(f"\n📄  Saved plain text → {out_path}", "success")
@@ -281,11 +313,13 @@ class ProcessingWorker(QThread):
         level: str,
         meta: dict,
         ebooklib_epub,
+        lang_label: str = "",
     ) -> Path:
+        label = lang_label or f"Spanish {level}"
         out_path = out_folder / f"{stem}_ES_{level}.epub"
         try:
             out_book = ebooklib_epub.EpubBook()
-            out_book.set_title(meta["title"] or f"{stem} (Spanish {level})")
+            out_book.set_title(meta["title"] or f"{stem} ({label})")
             out_book.set_language(meta["language"])
             if meta["creator"]:
                 out_book.add_author(meta["creator"])
@@ -294,7 +328,7 @@ class ProcessingWorker(QThread):
             out_book.add_metadata(
                 "DC",
                 "description",
-                f"Spanish {level} rewrite generated by BookWeaver via Ollama.",
+                f"{label} generated by BookWeaver via Ollama.",
             )
 
             spine = ["nav"]
@@ -344,6 +378,85 @@ class ProcessingWorker(QThread):
                         f"\n{'=' * 60}\n{title}\n{'=' * 60}\n\n{body}\n\n"
                     )
 
+        return out_path
+
+    def _write_html(
+        self,
+        results: list[tuple[str, str]],
+        out_folder: Path,
+        stem: str,
+        level: str,
+        meta: dict,
+        lang_label: str = "",
+    ) -> Path:
+        label = lang_label or f"Spanish {level}"
+        out_path = out_folder / f"{stem}_ES_{level}.html"
+        title = html.escape(meta["title"] or f"{stem} ({label})")
+        author = html.escape(meta["creator"]) if meta["creator"] else ""
+
+        chapters_html = []
+        for ch_title, body in results:
+            paragraphs = "".join(
+                f"    <p>{html.escape(p.strip())}</p>\n"
+                for p in body.split("\n")
+                if p.strip()
+            )
+            chapters_html.append(
+                f'  <section class="chapter">\n'
+                f'    <h2>{html.escape(ch_title)}</h2>\n'
+                f'{paragraphs}'
+                f'  </section>\n'
+            )
+
+        author_line = f'    <p class="author">{author}</p>\n' if author else ""
+        doc = (
+            "<!DOCTYPE html>\n"
+            '<html lang="es">\n'
+            "<head>\n"
+            '  <meta charset="UTF-8">\n'
+            f'  <title>{title}</title>\n'
+            "  <style>\n"
+            "    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }\n"
+            "    body {\n"
+            "      font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif;\n"
+            "      font-size: 17px;\n"
+            "      line-height: 1.75;\n"
+            "      color: #1a1a1a;\n"
+            "      background: #fafafa;\n"
+            "      max-width: 720px;\n"
+            "      margin: 0 auto;\n"
+            "      padding: 3rem 2rem 6rem;\n"
+            "    }\n"
+            "    header { margin-bottom: 3rem; border-bottom: 2px solid #e0e0e0; padding-bottom: 1.5rem; }\n"
+            "    header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.5px; }\n"
+            "    header .author { color: #555; margin-top: 0.4rem; font-size: 1rem; }\n"
+            "    header .meta { color: #999; font-size: 0.82rem; margin-top: 0.25rem; }\n"
+            "    .chapter { margin-top: 3.5rem; }\n"
+            "    .chapter h2 {\n"
+            "      font-size: 1.15rem;\n"
+            "      font-weight: 700;\n"
+            "      letter-spacing: 0.5px;\n"
+            "      text-transform: uppercase;\n"
+            "      color: #444;\n"
+            "      margin-bottom: 1.2rem;\n"
+            "      padding-bottom: 0.4rem;\n"
+            "      border-bottom: 1px solid #e8e8e8;\n"
+            "    }\n"
+            "    p { margin-top: 0.9rem; text-align: justify; }\n"
+            "    p:first-of-type { margin-top: 0; }\n"
+            "  </style>\n"
+            "</head>\n"
+            "<body>\n"
+            "  <header>\n"
+            f"    <h1>{title}</h1>\n"
+            f"{author_line}"
+            f'    <p class="meta">{html.escape(label)} · generated by BookWeaver</p>\n'
+            "  </header>\n"
+            + "".join(chapters_html)
+            + "</body>\n</html>\n"
+        )
+        out_path.write_text(doc, encoding="utf-8")
+        self.log.emit(f"\n🌐  Saved HTML → {out_path}", "success")
         return out_path
 
     # ── text helpers ──────────────────────────────────────────

@@ -27,5 +27,5 @@
     { "label": "Phi-4 14B",                  "value": "phi4:14b"     }
   ],
 
-  "default_model": "gemma3:27b"
+  "default_model": "gemma4:31b"
 }

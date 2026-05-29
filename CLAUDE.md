@@ -5,13 +5,15 @@
 ## What this project does
 
 BookWeaver is a PyQt6 desktop app.
-It reads an English EPUB and produces a Spanish version via Ollama, using one
-of two processing modes:
+It reads an English EPUB and produces output via Ollama, using one of three
+processing modes:
 
 - **Summarise → Rewrite** — condenses each chapter to a target length (via
   `build_summary_prompt`), then rewrites it in Spanish (via `build_rewrite_prompt`).
 - **Full translation** — translates each chapter chunk directly into Spanish
   (via `build_translation_prompt`), preserving the full source text.
+- **Summarise only** — condenses each chapter to the target length and saves the
+  result as English text; no translation is performed. Uses `build_summary_prompt`.
 
 Chapters longer than the configured chunk size are split at paragraph
 boundaries, processed independently, and rejoined.
@@ -79,9 +81,10 @@ All user-editable values live in `bookweaver.json`:
 
 | Key | Type | Description |
 |---|---|---|
-| `mode` | `str` | `"summarise_rewrite"` (default) or `"translate"` |
+| `mode` | `str` | `"summarise_rewrite"` (default), `"translate"`, or `"summarise_only"` |
 | `chunk_size` | `int` | Max words per chunk (default 2 000) |
-| `keep_pct` | `int` | Condensation % — used only in `summarise_rewrite` mode |
+| `keep_pct` | `int` | Condensation % — used in `summarise_rewrite` and `summarise_only` modes |
+| `out_format` | `list[str]` | One or more of `"txt"`, `"epub"`, `"html"` — all selected formats are written |
 | `creativity` | `int` | 1–10 scale; controls temperature and prose directives |
 | `level` | `str` | CEFR level: `"B1"`, `"B2"`, `"C1"`, or `"C2"` |
 
@@ -99,13 +102,16 @@ All user-editable values live in `bookweaver.json`:
    - **`translate`** (one LLM call per chunk):
      - `build_translation_prompt(chunk, level, idx, creativity)` → Spanish chapter text
 
-3. **Rejoin** — Spanish chunks are joined with `\n\n` into a single chapter result.
+   - **`summarise_only`** (one LLM call per chunk):
+     - `build_summary_prompt(chunk, keep_pct)` → condensed English (saved as-is, no rewrite)
+
+3. **Rejoin** — output chunks are joined with `\n\n` into a single chapter result.
 
 ### Progress bar
 
 `total_steps = len(chapters) * steps_per_chapter`
 where `steps_per_chapter` is **2** in `summarise_rewrite` mode and **1** in
-`translate` mode. This keeps the progress bar accurate regardless of mode.
+`translate` and `summarise_only` modes. This keeps the progress bar accurate regardless of mode.
 
 The log shows `Chapter 3.1/4`, `3.2/4` etc. when chunking is active.
 
@@ -114,7 +120,7 @@ The log shows `Chapter 3.1/4`, `3.2/4` etc. when chunking is active.
 ## Resume system
 
 `ProcessingWorker` tracks:
-- `completed_results` — list of `(title, spanish_text)` tuples updated after each chapter
+- `completed_results` — list of `(title, text)` tuples updated after each chapter (text is Spanish or English depending on mode)
 - `failed_at_chapter` — index of the chapter that failed
 
 On `finished(False)`, if `completed_results` is non-empty, `BookWeaverApp`
@@ -196,8 +202,8 @@ to `1200`. This is not related to any recent changes.
 
 ## Adding a new output format
 
-1. Add the radio button in `app.py → _add_options_group()`.
-2. Add a `_write_xxx()` method in `worker.py`.
+1. Add a `QCheckBox` in `app.py → _add_options_group()` and include it in the `out_fmt` list comprehension in `_build_config()`.
+2. Add a `_write_xxx()` method in `worker.py` — accept `lang_label` as a parameter so the output header reflects the actual language/mode.
 3. Add the branch in `worker.py → run()` after `# ── write output ──`.
 
 ---
@@ -219,7 +225,7 @@ All LLM instructions live in `prompts.py`:
 
 - `_LEVEL_GUIDANCE` — per-CEFR-level Spanish writing instructions (shared by all modes)
 - `_creativity_instruction()` — maps creativity 1–10 to prose directives (shared by all modes)
-- `build_summary_prompt()` — condensation prompt (word-count-target driven); used by summarise → rewrite only
+- `build_summary_prompt()` — condensation prompt (word-count-target driven); used by summarise → rewrite and summarise-only modes
 - `build_rewrite_prompt()` — Spanish rewrite prompt; used by summarise → rewrite only
 - `build_translation_prompt()` — direct translation prompt; used by full translation mode only
 
