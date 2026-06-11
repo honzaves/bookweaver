@@ -27,5 +27,28 @@
     { "label": "Phi-4 14B",                  "value": "phi4:14b"     }
   ],
 
-  "default_model": "gemma4:31b"
+  "default_model": "gemma4:31b",
+
+  "tts": {
+    "default_voice_es": "ef_dora",
+    "default_voice_en": "af_heart",
+    "mp3_bitrate_kbps": 96,
+    "inter_chapter_silence_ms": 1500,
+    "post_title_silence_ms": 1000
+  },
+
+  "voices": {
+    "es": [
+      { "label": "Dora (female)",   "value": "ef_dora"  },
+      { "label": "Alex (male)",     "value": "em_alex"  },
+      { "label": "Santa (male)",    "value": "em_santa" }
+    ],
+    "en": [
+      { "label": "Heart (female, US)",  "value": "af_heart"   },
+      { "label": "Bella (female, US)",  "value": "af_bella"   },
+      { "label": "Michael (male, US)",  "value": "am_michael" },
+      { "label": "Emma (female, UK)",   "value": "bf_emma"    },
+      { "label": "George (male, UK)",   "value": "bm_george"  }
+    ]
+  }
 }

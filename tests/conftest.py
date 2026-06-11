@@ -55,3 +55,13 @@ def _make_pyqt6_stubs() -> None:
     sys.modules["PyQt6.QtCore"] = qtcore
 
 _make_pyqt6_stubs()
+
+# ── TTS dependency stubs (only installed when absent) ──────────
+# tts.py's import gate probes for these heavy optional packages.
+# Empty stubs keep the suite fast and runnable on machines without
+# Kokoro installed. numpy must NOT be stubbed: pytest.approx inspects
+# sys.modules["numpy"] and an empty stub breaks it; tts.py's gate
+# already tolerates numpy being genuinely absent.
+for _name in ("kokoro", "soundfile", "lameenc", "mutagen", "mutagen.id3",
+              "torch"):
+    sys.modules.setdefault(_name, ModuleType(_name))

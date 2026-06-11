@@ -17,7 +17,7 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from prompts import build_summary_prompt, build_rewrite_prompt, build_translation_prompt
-from settings import creativity_to_temperature, OLLAMA_TIMEOUT
+from settings import creativity_to_temperature, OLLAMA_TIMEOUT, SETTINGS
 
 
 # ──────────────────────────────────────────────────────────────
@@ -281,7 +281,78 @@ class ProcessingWorker(QThread):
                     self._write_html(results, out_folder, stem, level, meta, lang_label)
                 )
 
+        # ── MP3 audiobook (optional) ──────────────────────────
+        # Guard on "txt" is defensive — the UI already enforces it — but
+        # keeps the worker correct in isolation.
+        if cfg.get("generate_mp3") and "txt" in out_formats:
+            self._generate_mp3(results, out_folder, stem, level, meta, cfg)
+
         self.finished.emit(True, ", ".join(str(p) for p in out_paths))
+
+    # ── MP3 audiobook ─────────────────────────────────────────
+    def _generate_mp3(
+        self,
+        results: list[tuple[str, str]],
+        out_folder: Path,
+        stem: str,
+        level: str,
+        meta: dict,
+        cfg: dict,
+    ) -> None:
+        """Synthesise *results* into one MP3 via Kokoro. Never raises —
+        a failure here must not undo the already-written text output."""
+        # Lazy import: pulls in torch only when MP3 output was requested.
+        from tts import (
+            TTS_AVAILABLE, TTS_IMPORT_ERROR, kokoro_lang_code, synthesise_book,
+        )
+
+        if not TTS_AVAILABLE:
+            self.log.emit(
+                f"MP3 requested but Kokoro is not installed "
+                f"({TTS_IMPORT_ERROR}). See kokoro.md.",
+                "error",
+            )
+            return
+
+        voice = cfg.get("voice")
+        if not voice:
+            self.log.emit(
+                "MP3 requested but no voice is selected — check the "
+                "'voices' block in bookweaver.json.",
+                "error",
+            )
+            return
+        lang_code = kokoro_lang_code(cfg.get("target_lang", "es"), voice)
+        tts_cfg = SETTINGS.get("tts", {})
+        out_path = out_folder / f"{stem}_ES_{level}.mp3"
+
+        self.log.emit(
+            f"\n🔊  Synthesising audiobook with voice '{voice}' "
+            f"(first run downloads the Kokoro model from Hugging Face)…",
+            "info",
+        )
+        try:
+            synthesise_book(
+                chapters=results,
+                voice=voice,
+                lang_code=lang_code,
+                out_path=out_path,
+                bitrate_kbps=int(tts_cfg.get("mp3_bitrate_kbps", 96)),
+                inter_chapter_silence_ms=int(
+                    tts_cfg.get("inter_chapter_silence_ms", 1500)
+                ),
+                post_title_silence_ms=int(
+                    tts_cfg.get("post_title_silence_ms", 1000)
+                ),
+                book_title=meta["title"],
+                author=meta["creator"],
+                on_chapter=lambda i, n: self.log.emit(
+                    f"   ↳ Chapter {i}/{n} synthesised.", "muted"
+                ),
+            )
+            self.log.emit(f"🎧  Saved MP3 → {out_path}", "success")
+        except Exception as exc:
+            self.log.emit(f"MP3 generation failed: {exc}", "error")
 
     # ── output writers ────────────────────────────────────────
     def _write_txt(

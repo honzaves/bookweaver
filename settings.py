@@ -242,6 +242,8 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
     SETTINGS = {
         "models":        cfg["models"],
         "default_model": cfg["default_model"],
+        "voices":        cfg.get("voices", {}),
+        "tts":           cfg.get("tts", {}),
     }
 
     OLLAMA_TIMEOUT = int(cfg.get("ollama_timeout", 1200))
@@ -249,6 +251,22 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
 
 # Initialise module-level constants from the default config path.
 _build()
+
+
+# ──────────────────────────────────────────────────────────────
+#  TTS VOICE SELECTION
+# ──────────────────────────────────────────────────────────────
+# Target language of each processing mode's output text.
+TARGET_LANG = {
+    "summarise_rewrite": "es",
+    "translate":         "es",
+    "summarise_only":    "en",
+}
+
+
+def voices_for_language(lang_code: str) -> list[dict]:
+    """Return the configured voice list for a 2-letter language code."""
+    return SETTINGS.get("voices", {}).get(lang_code, [])
 
 
 # ──────────────────────────────────────────────────────────────

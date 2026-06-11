@@ -1,0 +1,10 @@
+# Optional TTS dependencies for MP3 audiobook output (see kokoro.md).
+# Spanish voices additionally require espeak-ng:  brew install espeak-ng
+kokoro>=0.9
+soundfile>=0.12
+lameenc>=1.7
+mutagen>=1.47
+# English voices need this spaCy model. misaki tries to auto-download it
+# at first use via pip, which dies in pip-less venvs (e.g. created by uv),
+# so install it explicitly up front.
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl

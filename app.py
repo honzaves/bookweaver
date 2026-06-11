@@ -12,6 +12,7 @@ Responsibilities
 - Relay worker signals to the log and progress bar.
 """
 
+import importlib.util
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
@@ -40,6 +41,8 @@ from settings import (
     C_SURFACE,
     OLLAMA_TIMEOUT,
     SETTINGS,
+    TARGET_LANG,
+    voices_for_language,
 )
 from widgets import (
     CreativitySlider,
@@ -289,6 +292,29 @@ class BookWeaverApp(QMainWindow):
         ol.addLayout(fmt_row)
 
         ol.addSpacing(4)
+        # ── MP3 audiobook (Kokoro TTS, optional install) ──
+        self._tts_available = importlib.util.find_spec("kokoro") is not None
+        self._mp3_chk = QCheckBox("Generate MP3 audiobook  (Kokoro TTS)")
+        ol.addWidget(self._mp3_chk)
+
+        self._voice_row = QWidget()
+        vr = QHBoxLayout(self._voice_row)
+        vr.setContentsMargins(24, 0, 0, 0)
+        vr.addWidget(QLabel("Voice:"))
+        self._voice_combo = QComboBox()
+        vr.addWidget(self._voice_combo)
+        vr.addStretch()
+        self._voice_row.setVisible(False)
+        ol.addWidget(self._voice_row)
+
+        self._mp3_chk.toggled.connect(self._voice_row.setVisible)
+        self._fmt_txt.toggled.connect(
+            lambda _: self._update_mp3_checkbox_state()
+        )
+        self._rebuild_voice_combo()
+        self._update_mp3_checkbox_state()
+
+        ol.addSpacing(4)
         ol.addWidget(QLabel("Output folder:"))
         self._out_folder = FolderPickerRow(
             "Same folder as source file (default)"
@@ -459,12 +485,7 @@ class BookWeaverApp(QMainWindow):
             self._log.append_line("Please select at least one output format.", "warning")
             return None
         out_folder = self._out_folder.path() or str(Path(path).parent)
-        if self._mode_translate.isChecked():
-            mode = "translate"
-        elif self._mode_summarise_only.isChecked():
-            mode = "summarise_only"
-        else:
-            mode = "summarise_rewrite"
+        mode = self._selected_mode()
         return {
             "epub_path": path,
             "level": self._level_combo.currentData(),
@@ -481,7 +502,20 @@ class BookWeaverApp(QMainWindow):
             "meta_language": self._meta_language.text().strip() or "es",
             "meta_contributor": self._meta_contributor.text().strip(),
             "timeout": self._timeout_spin.value(),
+            "generate_mp3": self._mp3_chk.isChecked(),
+            "voice": (
+                self._voice_combo.currentData()
+                if self._mp3_chk.isChecked() else None
+            ),
+            "target_lang": TARGET_LANG[mode],
         }
+
+    def _selected_mode(self) -> str:
+        if self._mode_translate.isChecked():
+            return "translate"
+        if self._mode_summarise_only.isChecked():
+            return "summarise_only"
+        return "summarise_rewrite"
 
     def _on_mode_changed(self) -> None:
         """Show/hide controls based on selected processing mode."""
@@ -490,6 +524,41 @@ class BookWeaverApp(QMainWindow):
         self._summarisation_widget.setVisible(not translate)
         self._translate_note.setVisible(translate)
         self._summarise_only_note.setVisible(summarise_only)
+        # The voice combo is built in a later group than the mode radios.
+        if hasattr(self, "_voice_combo"):
+            self._rebuild_voice_combo()
+
+    def _rebuild_voice_combo(self) -> None:
+        """Repopulate the voice list for the current mode's target language,
+        preserving the selection when the voice exists in both lists."""
+        lang = TARGET_LANG[self._selected_mode()]
+        previous = self._voice_combo.currentData()
+        default = SETTINGS.get("tts", {}).get(f"default_voice_{lang}")
+        self._voice_combo.clear()
+        for entry in voices_for_language(lang):
+            self._voice_combo.addItem(entry["label"], userData=entry["value"])
+        idx = self._voice_combo.findData(previous)
+        if idx < 0:
+            idx = self._voice_combo.findData(default)
+        self._voice_combo.setCurrentIndex(max(idx, 0))
+
+    def _update_mp3_checkbox_state(self) -> None:
+        """Enable/disable the MP3 checkbox, with a tooltip naming the cause."""
+        if not self._tts_available:
+            self._mp3_chk.setChecked(False)
+            self._mp3_chk.setEnabled(False)
+            self._mp3_chk.setToolTip(
+                "Install Kokoro to enable MP3 output — see kokoro.md."
+            )
+        elif not self._fmt_txt.isChecked():
+            self._mp3_chk.setChecked(False)
+            self._mp3_chk.setEnabled(False)
+            self._mp3_chk.setToolTip(
+                "Enable plain-text output to use MP3 audiobook generation."
+            )
+        else:
+            self._mp3_chk.setEnabled(True)
+            self._mp3_chk.setToolTip("")
 
     def _set_running(self, running: bool) -> None:
         self._start_btn.setEnabled(not running)

@@ -30,7 +30,8 @@ boundaries, processed independently, and rejoined.
 | `prompts.py` | All LLM prompt strings | For prompt tuning |
 | `widgets.py` | All reusable Qt widgets | For new/changed widgets |
 | `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
-| `bookweaver.json` | All user-editable settings: colours, models, timeout | User edits; no code changes |
+| `tts.py` | Kokoro TTS → MP3 audiobook with ID3 chapters; optional deps behind an import gate | For TTS/audio changes |
+| `bookweaver.json` | All user-editable settings: colours, models, timeout, TTS voices | User edits; no code changes |
 
 ---
 
@@ -38,11 +39,16 @@ boundaries, processed independently, and rejoined.
 
 1. **Imports flow one way:**
    `main` → `app` → `worker`, `widgets`, `settings`
-   `worker` → `prompts`, `settings`
+   `worker` → `prompts`, `settings`, `tts` (lazy, inside `_generate_mp3` only)
    `widgets` → `settings`
    `prompts` → nothing
+   `tts` → optional TTS deps only (`kokoro`, `numpy`, `soundfile`, `lameenc`,
+   `mutagen`), all behind the `TTS_AVAILABLE` import gate; never Qt, never
+   `app`/`worker`
    `settings` → nothing (stdlib only)
    Never import `app` or `worker` from `widgets` or `settings`.
+   `app.py` must not import `tts` — it checks Kokoro availability cheaply
+   via `importlib.util.find_spec("kokoro")` to avoid loading torch at startup.
 
 2. **All colours come from `bookweaver.json` via `settings.py`.**
    Never hardcode hex values anywhere else.
@@ -68,6 +74,10 @@ All user-editable values live in `bookweaver.json`:
 - `models` — list of `{label, value}` objects for the model dropdown
 - `default_model` — value string of the default selection
 - `ollama_timeout` — default timeout in seconds (overridable per-run in the UI)
+- `tts` — MP3 audiobook defaults: `default_voice_es`, `default_voice_en`,
+  `mp3_bitrate_kbps`, `inter_chapter_silence_ms`, `post_title_silence_ms`
+- `voices` — per-language (`es`/`en`) lists of `{label, value}` Kokoro voices
+  for the voice dropdown; adding/removing a voice is a JSON edit, no code change
 
 `settings.py` loads this at import time via `_build()`, which populates all
 `C_*` colour constants, builds `STYLESHEET`, populates `SETTINGS`, and sets
@@ -87,6 +97,9 @@ All user-editable values live in `bookweaver.json`:
 | `out_format` | `list[str]` | One or more of `"txt"`, `"epub"`, `"html"` — all selected formats are written |
 | `creativity` | `int` | 1–10 scale; controls temperature and prose directives |
 | `level` | `str` | CEFR level: `"B1"`, `"B2"`, `"C1"`, or `"C2"` |
+| `generate_mp3` | `bool` | Synthesise an MP3 audiobook after the text output (requires `"txt"` in `out_format` and the optional Kokoro install — see `kokoro.md`) |
+| `voice` | `str \| None` | Kokoro voice id (e.g. `"ef_dora"`); `None` when MP3 is off |
+| `target_lang` | `str` | `"es"` or `"en"` — from `TARGET_LANG[mode]` in `settings.py`; selects the voice list and Kokoro language |
 
 ### Per chapter
 
@@ -106,6 +119,15 @@ All user-editable values live in `bookweaver.json`:
      - `build_summary_prompt(chunk, keep_pct)` → condensed English (saved as-is, no rewrite)
 
 3. **Rejoin** — output chunks are joined with `\n\n` into a single chapter result.
+
+### After all chapters (optional MP3)
+
+If `generate_mp3` is set and `"txt"` is among the output formats, the worker
+calls `tts.synthesise_book()` on the final `(title, text)` list as the last
+step in `run()`, producing `{stem}_ES_{level}.mp3` with ID3v2 CHAP/CTOC
+chapter markers. TTS does **not** count toward `total_steps` — it runs after
+the progress bar fills and reports via log lines only. An MP3 failure is
+logged but never fails the run (text outputs are already written).
 
 ### Progress bar
 
@@ -182,7 +204,10 @@ pytest -q        # quiet output
 ```
 
 Tested modules: `prompts.py`, `settings.py`, `worker.py` (pure functions and
-file I/O). The Qt pipeline and full Ollama integration are not unit-tested.
+file I/O), `tts.py` (import gate and pure helpers only). The Qt pipeline,
+full Ollama integration, and real Kokoro synthesis are not unit-tested —
+`conftest.py` also stubs the optional TTS packages (but never `numpy`:
+`pytest.approx` inspects `sys.modules["numpy"]` and an empty stub breaks it).
 
 One pre-existing failure exists in `test_settings.py::TestOllamaTimeout::test_defaults_when_missing`
 — the test asserts a default of `600` but `settings.py` has always defaulted

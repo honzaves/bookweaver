@@ -60,6 +60,22 @@ Or for development (includes pytest):
 pip install -r requirements-dev.txt
 ```
 
+### Optional: MP3 audiobook output
+
+BookWeaver can synthesise a single `.mp3` audiobook (with ID3 chapter
+markers) from the generated text using [Kokoro](https://github.com/hexgrad/kokoro)
+TTS, running entirely locally. This is an optional install — expect a
+~2.5 GB download (PyTorch + model weights):
+
+```bash
+brew install espeak-ng          # required for Spanish voices
+pip install -r requirements-tts.txt
+```
+
+See [kokoro.md](kokoro.md) for full installation instructions, the design,
+and a smoke test. Without these packages the MP3 checkbox is simply
+disabled; everything else works as normal.
+
 ---
 
 ## Running
