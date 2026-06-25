@@ -26,7 +26,8 @@ boundaries, processed independently, and rejoined.
 |---|---|---|
 | `main.py` | Entry point only | Rarely |
 | `app.py` | Main window, UI wiring, slot logic | For new UI elements |
-| `worker.py` | Background thread, pipeline, file output | For pipeline changes |
+| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); shared by app & worker | For chapter extraction/title logic |
+| `worker.py` | Background thread, pipeline, file output (no longer extracts chapters inline — delegates to `epub_io`) | For pipeline changes |
 | `prompts.py` | All LLM prompt strings | For prompt tuning |
 | `widgets.py` | All reusable Qt widgets | For new/changed widgets |
 | `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
@@ -39,8 +40,12 @@ boundaries, processed independently, and rejoined.
 
 1. **Imports flow one way:**
    `main` → `app` → `worker`, `widgets`, `settings`
+   `app` → `epub_io` (lazy, in `_on_epub_selected`)
    `worker` → `prompts`, `settings`, `tts` (lazy, inside `_generate_mp3` only)
-   `widgets` → `settings`
+   `worker` → `epub_io` (lazy, inside `run`)
+   `widgets` → `settings` (only — `ChapterListWidget` stays decoupled from
+   `epub_io`; the app passes it plain `(index, label)` pairs)
+   `epub_io` → `ebooklib`/`bs4` only; never Qt, `app`, `worker`, or `settings`
    `prompts` → nothing
    `tts` → optional TTS deps only (`kokoro`, `numpy`, `soundfile`, `lameenc`,
    `mutagen`), all behind the `TTS_AVAILABLE` import gate; never Qt, never
@@ -74,6 +79,9 @@ All user-editable values live in `bookweaver.json`:
 - `models` — list of `{label, value}` objects for the model dropdown
 - `default_model` — value string of the default selection
 - `ollama_timeout` — default timeout in seconds (overridable per-run in the UI)
+- `chapter_title_preview_chars` — fallback title length (default 50): when a
+  chapter has no TOC title or heading, its title is the first N characters of
+  its text
 - `tts` — MP3 audiobook defaults: `default_voice_es`, `default_voice_en`,
   `mp3_bitrate_kbps`, `inter_chapter_silence_ms`, `post_title_silence_ms`
 - `voices` — per-language (`es`/`en`) lists of `{label, value}` Kokoro voices
@@ -95,6 +103,7 @@ All user-editable values live in `bookweaver.json`:
 | `chunk_size` | `int` | Max words per chunk (default 2 000) |
 | `keep_pct` | `int` | Condensation % — used in `summarise_rewrite` and `summarise_only` modes |
 | `out_format` | `list[str]` | One or more of `"txt"`, `"epub"`, `"html"` — all selected formats are written |
+| `selected_chapters` | `list[int]` | Indices (into the extracted chapter list) the user ticked; the worker processes only these. `None`/absent means all |
 | `creativity` | `int` | 1–10 scale; controls temperature and prose directives |
 | `level` | `str` | CEFR level: `"B1"`, `"B2"`, `"C1"`, or `"C2"` |
 | `generate_mp3` | `bool` | Synthesise an MP3 audiobook after the text output (requires `"txt"` in `out_format` and the optional Kokoro install — see `kokoro.md`) |
@@ -119,6 +128,14 @@ All user-editable values live in `bookweaver.json`:
      - `build_summary_prompt(chunk, keep_pct)` → condensed English (saved as-is, no rewrite)
 
 3. **Rejoin** — output chunks are joined with `\n\n` into a single chapter result.
+
+4. **Per-chapter file (txt only)** — once a chapter completes, if `"txt"` is in
+   `out_format`, its result is also written to
+   `{stem}_ES_{level}_chapters/{NN} - {title}.txt` (all modes), where `NN` is
+   `index + 1` (the number shown in the UI chapter list). Both this file and the
+   assembled `.txt` use the shared `ProcessingWorker._chapter_block` formatter,
+   so their per-chapter formatting stays identical. The assembled `.txt` is
+   still written normally after all chapters.
 
 ### After all chapters (optional MP3)
 
@@ -151,6 +168,10 @@ creates a new worker with `resume_from`, `prior_results`, `timeout`, and
 `chunk_size` injected into the config dict. The chapter loop skips
 already-done chapters and seeds `results` with the prior work.
 
+`_on_resume` rebuilds the config by spreading the original (`**config`), so
+`selected_chapters` rides along automatically — a resumed run reprocesses the
+same chapter subset, and `resume_from` indexes into that already-filtered list.
+
 ---
 
 ## Timeout
@@ -182,12 +203,14 @@ Expected output:
 
 ```
 app.py:    class BookWeaverApp(QMainWindow)
+epub_io.py: class Chapter
 widgets.py: class SummarizationSlider(QWidget)
 widgets.py: class CreativitySlider(QWidget)
 widgets.py: class FilePickerRow(QWidget)
 widgets.py: class FolderPickerRow(QWidget)
 widgets.py: class LogWidget(QTextEdit)
 widgets.py: class ProgressBar(QWidget)
+widgets.py: class ChapterListWidget(QWidget)
 worker.py:  class ProcessingWorker(QThread)
 ```
 
