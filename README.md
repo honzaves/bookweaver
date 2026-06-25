@@ -235,7 +235,7 @@ No Qt installation required — the test suite stubs out PyQt6.
 | Condensation | 30–50 %        | Keeps core story, removes padding |
 | Creativity | 5–6            | Adds atmosphere without inventing events |
 | Chunk size | 2 000 words    | Safe default for most models |
-| Model | `gemma4:31b`   | Fast on Apple Silicon, good Spanish quality |
+| Model | `gemma4:31b-mxfp8`   | Fast on Apple Silicon, good Spanish quality |
 | Timeout | 900 s          | Enough for large chapters at moderate keep % |
 | First chapter only | ✅ on first run | Validate prompts cheaply before full run |
 

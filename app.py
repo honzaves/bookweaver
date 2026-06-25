@@ -158,7 +158,7 @@ class BookWeaverApp(QMainWindow):
         col1 = QVBoxLayout()
         col1.addWidget(QLabel("Ollama model:"))
         self._model_combo = QComboBox()
-        default_val = SETTINGS.get("default_model", "gemma4:31b")
+        default_val = SETTINGS.get("default_model", "gemma4:31b-mxfp8")
         default_idx = 0
         for i, entry in enumerate(SETTINGS.get("models", [])):
             self._model_combo.addItem(entry["label"], userData=entry["value"])

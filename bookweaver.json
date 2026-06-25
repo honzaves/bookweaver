@@ -19,15 +19,12 @@
   },
 
   "models": [
-    { "label": "Gemma 4 31B  (recommended)", "value": "gemma4:31b"   },
-    { "label": "Gemma 3 27B  (2nd recommended)", "value": "gemma3:27b"   },
-    { "label": "Llama 3.3 70B",              "value": "llama3.3:70b" },
-    { "label": "Mistral 7B",                 "value": "mistral:7b"   },
-    { "label": "Qwen 2.5 14B",               "value": "qwen2.5:14b"  },
-    { "label": "Phi-4 14B",                  "value": "phi4:14b"     }
+    { "label": "Gemma 4 31B  (recommended)", "value": "gemma4:31b-mxfp8"   },
+    { "label": "Gemma 4 26B  (2nd recommended)", "value": "gemma4:26b-mxfp8"   },
+    { "label": "Gemma 3 27B  (3rd recommended)", "value": "gemma3:27b"   }
   ],
 
-  "default_model": "gemma4:31b",
+  "default_model": "gemma4:31b-mxfp8",
 
   "tts": {
     "default_voice_es": "ef_dora",
