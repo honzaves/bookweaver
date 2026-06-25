@@ -12,6 +12,7 @@ Output is written as plain text or EPUB depending on the job config.
 """
 
 import html
+import re
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -360,6 +361,35 @@ class ProcessingWorker(QThread):
         """The shared `===`-delimited chapter block used by both the
         assembled .txt output and the per-chapter .txt files."""
         return f"\n{'=' * 60}\n{title}\n{'=' * 60}\n\n{body}\n\n"
+
+    @staticmethod
+    def _safe_filename(title: str) -> str:
+        """Make *title* safe for a filename: strip illegal characters,
+        collapse whitespace, cap length. Falls back to 'untitled'."""
+        cleaned = re.sub(r'[/\\:*?"<>|]', "", title)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned[:80].strip() or "untitled"
+
+    def _write_chapter_file(
+        self,
+        out_folder: Path,
+        stem: str,
+        level: str,
+        index: int,
+        title: str,
+        body: str,
+    ) -> Path:
+        """Write a single chapter's result to
+        {stem}_ES_{level}_chapters/{NN} - {title}.txt and return the path.
+        NN = index + 1, matching the number shown in the UI chapter list."""
+        chapters_dir = out_folder / f"{stem}_ES_{level}_chapters"
+        chapters_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"{index + 1:02d} - {self._safe_filename(title)}.txt"
+        out_path = chapters_dir / fname
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write(self._chapter_block(title, body))
+        self.log.emit(f"   ↳ Saved chapter file → {out_path.name}", "muted")
+        return out_path
 
     def _write_txt(
         self,

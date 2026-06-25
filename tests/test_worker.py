@@ -416,3 +416,38 @@ class TestChapterBlock:
         block = ProcessingWorker._chapter_block("My Title", "Some body text")
         assert "My Title" in block
         assert "Some body text" in block
+
+
+class TestSafeFilename:
+    def test_replaces_path_separators(self):
+        assert "/" not in ProcessingWorker._safe_filename("a/b")
+        assert "\\" not in ProcessingWorker._safe_filename("a\\b")
+
+    def test_collapses_whitespace(self):
+        assert ProcessingWorker._safe_filename("a   b\tc") == "a b c"
+
+    def test_caps_length(self):
+        assert len(ProcessingWorker._safe_filename("x" * 200)) <= 80
+
+    def test_empty_falls_back(self):
+        assert ProcessingWorker._safe_filename("   ") == "untitled"
+
+
+class TestWriteChapterFile:
+    def test_creates_subfolder_and_numbered_file(self, tmp_path):
+        w = _make_worker()
+        out = w._write_chapter_file(tmp_path, "mybook", "B2", 2, "The Title", "Body.")
+        assert out.parent.name == "mybook_ES_B2_chapters"
+        assert out.name == "03 - The Title.txt"
+        assert out.exists()
+
+    def test_file_contains_block(self, tmp_path):
+        w = _make_worker()
+        out = w._write_chapter_file(tmp_path, "b", "B2", 0, "T", "Hello body")
+        text = out.read_text(encoding="utf-8")
+        assert "T" in text and "Hello body" in text
+
+    def test_index_zero_is_one_padded(self, tmp_path):
+        w = _make_worker()
+        out = w._write_chapter_file(tmp_path, "b", "B2", 0, "First", "x")
+        assert out.name.startswith("01 - ")
