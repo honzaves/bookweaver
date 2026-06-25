@@ -11,6 +11,7 @@ FilePickerRow        — inline path display + browse button for EPUB files.
 FolderPickerRow      — inline path display + browse button for directories.
 LogWidget            — colour-coded read-only log pane.
 ProgressBar          — thin custom amber progress bar.
+ChapterListWidget    — scrollable chapter checkboxes with a Select-all master.
 """
 
 import html
@@ -19,11 +20,13 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QPainter
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSlider,
     QTextEdit,
     QVBoxLayout,
@@ -347,3 +350,85 @@ class ProgressBar(QWidget):
             p.drawRoundedRect(0, 0, fill_w, h, r, r)
 
         p.end()
+
+
+# ──────────────────────────────────────────────────────────────
+#  CHAPTER LIST WIDGET
+# ──────────────────────────────────────────────────────────────
+class ChapterListWidget(QWidget):
+    """A scrollable list of chapter checkboxes with a 'Select all' master
+    checkbox. Generic: it knows only (index, label) pairs, never the EPUB.
+
+    Use set_chapters() to (re)populate, selected_indices() to read the
+    selection."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self._select_all = QCheckBox("Select all")
+        self._select_all.setTristate(True)
+        self._select_all.clicked.connect(self._on_select_all_clicked)
+        layout.addWidget(self._select_all)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(140)
+        scroll.setMaximumHeight(260)
+        self._inner = QWidget()
+        self._inner_layout = QVBoxLayout(self._inner)
+        self._inner_layout.setContentsMargins(8, 4, 8, 4)
+        self._inner_layout.setSpacing(2)
+        self._inner_layout.addStretch()
+        scroll.setWidget(self._inner)
+        layout.addWidget(scroll)
+
+        # index -> QCheckBox
+        self._boxes: dict[int, QCheckBox] = {}
+
+    def clear(self) -> None:
+        for box in self._boxes.values():
+            self._inner_layout.removeWidget(box)
+            box.deleteLater()
+        self._boxes = {}
+        self._refresh_select_all()
+
+    def set_chapters(self, pairs: list[tuple[int, str]]) -> None:
+        """Replace the list. All chapters start checked."""
+        self.clear()
+        # insert before the trailing stretch (last item)
+        insert_at = self._inner_layout.count() - 1
+        for index, label in pairs:
+            box = QCheckBox(label)
+            box.setChecked(True)
+            box.toggled.connect(self._refresh_select_all)
+            self._inner_layout.insertWidget(insert_at, box)
+            insert_at += 1
+            self._boxes[index] = box
+        self._refresh_select_all()
+
+    def selected_indices(self) -> list[int]:
+        return sorted(i for i, b in self._boxes.items() if b.isChecked())
+
+    def _on_select_all_clicked(self) -> None:
+        # On click, drive every child to the master's new checked state.
+        target = self._select_all.checkState() != Qt.CheckState.Unchecked
+        for box in self._boxes.values():
+            box.blockSignals(True)
+            box.setChecked(target)
+            box.blockSignals(False)
+        self._refresh_select_all()
+
+    def _refresh_select_all(self) -> None:
+        total = len(self._boxes)
+        checked = sum(1 for b in self._boxes.values() if b.isChecked())
+        self._select_all.blockSignals(True)
+        if total == 0 or checked == 0:
+            self._select_all.setCheckState(Qt.CheckState.Unchecked)
+        elif checked == total:
+            self._select_all.setCheckState(Qt.CheckState.Checked)
+        else:
+            self._select_all.setCheckState(Qt.CheckState.PartiallyChecked)
+        self._select_all.blockSignals(False)
