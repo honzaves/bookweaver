@@ -99,7 +99,12 @@ class ProcessingWorker(QThread):
         self.log.emit(f"📖  Loading {Path(epub_path).name}…", "info")
 
         preview_chars = SETTINGS.get("chapter_title_preview_chars", 50)
-        all_chapters = epub_io.extract_chapters(epub_path, preview_chars)
+        try:
+            all_chapters = epub_io.extract_chapters(epub_path, preview_chars)
+        except Exception as exc:
+            self.log.emit(f"Failed to open EPUB: {exc}", "error")
+            self.finished.emit(False, "")
+            return
         if not all_chapters:
             self.log.emit("No readable chapters found in EPUB.", "error")
             self.finished.emit(False, "")
