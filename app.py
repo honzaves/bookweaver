@@ -45,6 +45,7 @@ from settings import (
     voices_for_language,
 )
 from widgets import (
+    ChapterListWidget,
     CreativitySlider,
     FilePickerRow,
     FolderPickerRow,
@@ -101,6 +102,7 @@ class BookWeaverApp(QMainWindow):
         outer.addWidget(scroll, 1)
 
         self._add_source_group(form)
+        self._add_chapters_group(form)
         self._add_model_group(form)
         self._add_summarisation_group(form)
         self._add_creativity_group(form)
@@ -147,6 +149,15 @@ class BookWeaverApp(QMainWindow):
         self._file_picker = FilePickerRow("Select an .epub file…")
         self._file_picker.fileSelected.connect(self._on_epub_selected)
         gl.addWidget(self._file_picker)
+        form.addWidget(grp)
+
+    def _add_chapters_group(self, form: QVBoxLayout) -> None:
+        grp = QGroupBox("Chapters")
+        cl = QVBoxLayout(grp)
+        cl.addWidget(QLabel("Select chapters to process:"))
+        self._chapter_list = ChapterListWidget()
+        cl.addWidget(self._chapter_list)
+        self._chapters: list = []  # list[epub_io.Chapter]; filled on selection
         form.addWidget(grp)
 
     def _add_model_group(self, form: QVBoxLayout) -> None:
@@ -270,12 +281,6 @@ class BookWeaverApp(QMainWindow):
         grp = QGroupBox("Options")
         ol = QVBoxLayout(grp)
         ol.setSpacing(10)
-
-        self._first_only_chk = QCheckBox(
-            "Process first chapter only  (quick test run)"
-        )
-        self._first_only_chk.setChecked(True)
-        ol.addWidget(self._first_only_chk)
 
         ol.addWidget(self._make_separator())
 
@@ -467,6 +472,21 @@ class BookWeaverApp(QMainWindow):
         if not self._out_folder.path():
             self._out_folder.set_path(str(Path(path).parent))
 
+        # Build the chapter selection list.
+        try:
+            import epub_io
+            preview_chars = SETTINGS.get("chapter_title_preview_chars", 50)
+            self._chapters = epub_io.extract_chapters(path, preview_chars)
+            self._chapter_list.set_chapters(
+                [(c.index, f"{c.index + 1:02d}. {c.title}") for c in self._chapters]
+            )
+        except Exception as exc:
+            self._chapters = []
+            self._chapter_list.clear()
+            self.statusBar().showMessage(
+                f"Could not read chapters: {exc}", 5000
+            )
+
     def _build_config(self) -> dict | None:
         path = self._file_picker.path()
         if not path:
@@ -484,6 +504,12 @@ class BookWeaverApp(QMainWindow):
         if not out_fmt:
             self._log.append_line("Please select at least one output format.", "warning")
             return None
+        selected = self._chapter_list.selected_indices()
+        if not selected:
+            self._log.append_line(
+                "Please select at least one chapter to process.", "warning"
+            )
+            return None
         out_folder = self._out_folder.path() or str(Path(path).parent)
         mode = self._selected_mode()
         return {
@@ -491,9 +517,9 @@ class BookWeaverApp(QMainWindow):
             "level": self._level_combo.currentData(),
             "keep_pct": self._slider.value(),
             "model": self._model_combo.currentData(),
-            "first_only": self._first_only_chk.isChecked(),
             "out_format": out_fmt,
             "out_folder": out_folder,
+            "selected_chapters": selected,
             "creativity": self._creativity_slider.value(),
             "mode": mode,
             "chunk_size": self._chunk_spin.value(),
