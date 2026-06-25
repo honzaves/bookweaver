@@ -64,6 +64,7 @@ class ProcessingWorker(QThread):
             from ebooklib import epub as ebooklib_epub
             import httpx
             from bs4 import BeautifulSoup
+            import epub_io
         except ImportError as exc:
             self.log.emit(
                 f"Missing dependency: {exc}\n"
@@ -78,7 +79,6 @@ class ProcessingWorker(QThread):
         level = cfg["level"]
         keep_pct = cfg["keep_pct"]
         model = cfg["model"]
-        first_only = cfg["first_only"]
         out_format = cfg["out_format"]
         out_folder = (
             Path(cfg["out_folder"]) if cfg.get("out_folder")
@@ -97,32 +97,31 @@ class ProcessingWorker(QThread):
 
         # ── load source EPUB ──────────────────────────────────
         self.log.emit(f"📖  Loading {Path(epub_path).name}…", "info")
-        try:
-            book = ebooklib_epub.read_epub(epub_path)
-        except Exception as exc:
-            self.log.emit(f"Failed to open EPUB: {exc}", "error")
-            self.finished.emit(False, "")
-            return
 
-        chapters = []
-        for item in book.get_items():
-            if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                soup = BeautifulSoup(item.get_content(), "html.parser")
-                text = soup.get_text(separator="\n").strip()
-                if len(text) > 200:  # skip tiny nav/cover pages
-                    chapters.append((item.get_name(), text))
-
-        if not chapters:
+        preview_chars = SETTINGS.get("chapter_title_preview_chars", 50)
+        all_chapters = epub_io.extract_chapters(epub_path, preview_chars)
+        if not all_chapters:
             self.log.emit("No readable chapters found in EPUB.", "error")
             self.finished.emit(False, "")
             return
 
-        if first_only:
-            chapters = chapters[:1]
-            self.log.emit("ℹ️   Processing first chapter only.", "info")
+        chapters = epub_io.select_chapters(
+            all_chapters, cfg.get("selected_chapters")
+        )
+        if not chapters:
+            self.log.emit("No chapters selected to process.", "error")
+            self.finished.emit(False, "")
+            return
+        if len(chapters) < len(all_chapters):
+            self.log.emit(
+                f"ℹ️   Processing {len(chapters)} of "
+                f"{len(all_chapters)} chapters.", "info"
+            )
 
         steps_per_chapter = 1 if mode in ("translate", "summarise_only") else 2
         total_steps = len(chapters) * steps_per_chapter
+        out_formats = out_format if isinstance(out_format, list) else [out_format]
+        stem = Path(epub_path).stem
         # Seed results and progress from any previously completed chapters.
         results: list[tuple[str, str]] = list(cfg.get("prior_results", []))
         step = resume_from * steps_per_chapter
@@ -136,7 +135,8 @@ class ProcessingWorker(QThread):
         else:
             self.log.emit(f"✅  Found {len(chapters)} chapter(s) to process.", "success")
 
-        for idx, (_name, text) in enumerate(chapters):
+        for idx, chapter in enumerate(chapters):
+            text = chapter.text
             # Skip chapters already completed in a prior run.
             if idx < resume_from:
                 continue
@@ -257,13 +257,17 @@ class ProcessingWorker(QThread):
             ch_title = f"Chapter {idx + 1}" if mode == "summarise_only" else f"Capítulo {idx + 1}"
             results.append((ch_title, "\n\n".join(spanish_parts)))
             self.completed_results = results[:]
+            if "txt" in out_formats:
+                self._write_chapter_file(
+                    out_folder, stem, level,
+                    chapter.index, chapter.title,
+                    "\n\n".join(spanish_parts),
+                )
             self.log.emit(f"✅  Chapter {idx + 1} done.", "success")
 
         # ── write output ──────────────────────────────────────
         out_folder.mkdir(parents=True, exist_ok=True)
-        stem = Path(epub_path).stem
         lang_label = "English summary" if mode == "summarise_only" else f"Spanish {level}"
-        out_formats = out_format if isinstance(out_format, list) else [out_format]
         out_paths = []
 
         for fmt in out_formats:

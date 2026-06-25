@@ -136,7 +136,6 @@ def _make_worker(config: dict | None = None) -> ProcessingWorker:
         "level": "B2",
         "keep_pct": 40,
         "model": "gemma3:27b",
-        "first_only": True,
         "out_format": "txt",
         "out_folder": "/tmp",
         "creativity": 5,
