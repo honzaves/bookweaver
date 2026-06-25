@@ -405,3 +405,14 @@ class TestOllamaCall:
         with p:
             result = w._ollama_call("gemma3:27b", "prompt", temperature=0.7)
         assert result == "stripped text"
+
+
+class TestChapterBlock:
+    def test_block_matches_legacy_format(self):
+        block = ProcessingWorker._chapter_block("Capítulo 1", "Hola mundo.")
+        assert block == f"\n{'=' * 60}\nCapítulo 1\n{'=' * 60}\n\nHola mundo.\n\n"
+
+    def test_title_and_body_present(self):
+        block = ProcessingWorker._chapter_block("My Title", "Some body text")
+        assert "My Title" in block
+        assert "Some body text" in block

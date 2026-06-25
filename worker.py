@@ -355,6 +355,12 @@ class ProcessingWorker(QThread):
             self.log.emit(f"MP3 generation failed: {exc}", "error")
 
     # ── output writers ────────────────────────────────────────
+    @staticmethod
+    def _chapter_block(title: str, body: str) -> str:
+        """The shared `===`-delimited chapter block used by both the
+        assembled .txt output and the per-chapter .txt files."""
+        return f"\n{'=' * 60}\n{title}\n{'=' * 60}\n\n{body}\n\n"
+
     def _write_txt(
         self,
         results: list[tuple[str, str]],
@@ -372,7 +378,7 @@ class ProcessingWorker(QThread):
                 fh.write(f"by {meta['creator']}\n")
             fh.write(f"{lang_label or f'Spanish ({level})'}\n{'─' * 60}\n\n")
             for title, body in results:
-                fh.write(f"\n{'=' * 60}\n{title}\n{'=' * 60}\n\n{body}\n\n")
+                fh.write(self._chapter_block(title, body))
         self.log.emit(f"\n📄  Saved plain text → {out_path}", "success")
         return out_path
 
