@@ -244,6 +244,9 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
         "default_model": cfg["default_model"],
         "voices":        cfg.get("voices", {}),
         "tts":           cfg.get("tts", {}),
+        "chapter_title_preview_chars": int(
+            cfg.get("chapter_title_preview_chars", 50)
+        ),
     }
 
     OLLAMA_TIMEOUT = int(cfg.get("ollama_timeout", 1200))

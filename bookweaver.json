@@ -2,6 +2,7 @@
   "_comment": "BookWeaver config — edit colours and models here. No code changes needed.",
 
   "ollama_timeout": 1200,
+  "chapter_title_preview_chars": 50,
 
   "colors": {
     "bg":        "#111210",

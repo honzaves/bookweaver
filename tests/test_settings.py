@@ -195,3 +195,22 @@ class TestOllamaTimeout:
         import settings as s
         assert s.OLLAMA_TIMEOUT == 600
         _build()  # restore
+
+
+# ──────────────────────────────────────────────────────────────
+#  chapter_title_preview_chars
+# ──────────────────────────────────────────────────────────────
+class TestChapterTitlePreviewChars:
+    def test_defaults_to_50_when_missing(self, tmp_path):
+        p = _write_json(tmp_path, MINIMAL_CFG)
+        _build(p)
+        assert settings_module.SETTINGS["chapter_title_preview_chars"] == 50
+        _build()  # restore
+
+    def test_reads_value_from_config(self, tmp_path):
+        cfg = dict(MINIMAL_CFG)
+        cfg["chapter_title_preview_chars"] = 80
+        p = _write_json(tmp_path, cfg)
+        _build(p)
+        assert settings_module.SETTINGS["chapter_title_preview_chars"] == 80
+        _build()  # restore
