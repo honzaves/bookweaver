@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import epub_io
 from worker import ProcessingWorker
 from settings import creativity_to_temperature
 
@@ -415,6 +416,56 @@ class TestChapterBlock:
         block = ProcessingWorker._chapter_block("My Title", "Some body text")
         assert "My Title" in block
         assert "Some body text" in block
+
+
+class TestRunChapterSelection:
+    """Regression pin for the chapter-selection contract in run().
+
+    When selected_chapters is a SUBSET, only those chapters are processed,
+    and each per-chapter filename uses chapter.index + 1 (the FULL-list
+    position), NOT the filtered-list position. So selecting full-list
+    indices [0, 2] must yield files '01 - …' and '03 - …' (never '01'/'02').
+    """
+
+    def test_subset_uses_fulllist_index_for_filenames(self, tmp_path):
+        chapters = [
+            epub_io.Chapter(0, "c0.xhtml", "Alpha", "alpha text"),
+            epub_io.Chapter(1, "c1.xhtml", "Beta", "beta text"),
+            epub_io.Chapter(2, "c2.xhtml", "Gamma", "gamma text"),
+        ]
+        w = _make_worker({
+            "epub_path": str(tmp_path / "mybook.epub"),
+            "out_format": ["txt"],
+            "out_folder": str(tmp_path),
+            "mode": "translate",
+            "level": "B2",
+            "keep_pct": 40,
+            "model": "m",
+            "creativity": 5,
+            "chunk_size": 2000,
+            "selected_chapters": [0, 2],
+        })
+        with patch.object(ProcessingWorker, "_ollama_call", return_value="texto"), \
+                patch.object(epub_io, "extract_chapters", return_value=chapters):
+            w.run()
+
+        # 1. The per-chapter subfolder exists and holds EXACTLY 2 files.
+        chapters_dir = tmp_path / "mybook_ES_B2_chapters"
+        assert chapters_dir.is_dir()
+        files = sorted(p.name for p in chapters_dir.glob("*.txt"))
+        assert len(files) == 2
+
+        # 2. Filenames use chapter.index + 1 → '01 - ' and '03 - '
+        #    (filtered position would wrongly give '01'/'02').
+        assert files[0].startswith("01 - ")
+        assert files[1].startswith("03 - ")
+
+        # 3. Exactly two chapters were assembled into the results.
+        assert len(w.completed_results) == 2
+
+        # 4. The run finished cleanly with success=True.
+        w.finished.emit.assert_called()
+        assert w.finished.emit.call_args[0][0] is True
 
 
 class TestSafeFilename:
