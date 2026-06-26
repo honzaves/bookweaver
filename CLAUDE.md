@@ -5,7 +5,7 @@
 ## What this project does
 
 BookWeaver is a PyQt6 desktop app.
-It reads an English EPUB and produces output via Ollama, using one of three
+It reads an English EPUB and produces output via Ollama, using one of four
 processing modes:
 
 - **Summarise → Rewrite** — condenses each chapter to a target length (via
@@ -14,6 +14,12 @@ processing modes:
   (via `build_translation_prompt`), preserving the full source text.
 - **Summarise only** — condenses each chapter to the target length and saves the
   result as English text; no translation is performed. Uses `build_summary_prompt`.
+- **Summary with key ideas** — condenses each chapter (in English, or in Spanish
+  at the chosen CEFR level via Summarise → Rewrite), then appends 1–5 key ideas
+  (each a bullet plus a ≤2-sentence explanation). After all chapters, if ≥2 were
+  processed, a book-wide "Key ideas of the book" synthesis is appended. Output
+  language is chosen per run. Uses `build_summary_prompt`,
+  `build_key_ideas_prompt`, and `build_book_key_ideas_prompt`.
 
 Chapters longer than the configured chunk size are split at paragraph
 boundaries, processed independently, and rejoined.
@@ -99,7 +105,8 @@ All user-editable values live in `bookweaver.json`:
 
 | Key | Type | Description |
 |---|---|---|
-| `mode` | `str` | `"summarise_rewrite"` (default), `"translate"`, or `"summarise_only"` |
+| `mode` | `str` | `"summarise_rewrite"` (default), `"translate"`, `"summarise_only"`, or `"summarise_key_ideas"` |
+| `summary_lang` | `str` | `"en"` or `"es"` — only used by `summarise_key_ideas`; selects the output language and (for `"es"`) drives the Summarise → Rewrite path. `target_lang` equals this for the mode. |
 | `chunk_size` | `int` | Max words per chunk (default 2 000) |
 | `keep_pct` | `int` | Condensation % — used in `summarise_rewrite` and `summarise_only` modes |
 | `out_format` | `list[str]` | One or more of `"txt"`, `"epub"`, `"html"` — all selected formats are written |
@@ -127,6 +134,12 @@ All user-editable values live in `bookweaver.json`:
    - **`summarise_only`** (one LLM call per chunk):
      - `build_summary_prompt(chunk, keep_pct)` → condensed English (saved as-is, no rewrite)
 
+   - **`summarise_key_ideas`** (per chunk: 1 call for English, 2 for Spanish):
+     - English → `build_summary_prompt` (saved as English).
+     - Spanish → `build_summary_prompt` → `build_rewrite_prompt`.
+     After the chunk loop, one `build_key_ideas_prompt` call per chapter appends
+     a localized "Key ideas / Ideas clave" section (1–5 bullets) to the body.
+
 3. **Rejoin** — output chunks are joined with `\n\n` into a single chapter result.
 
 4. **Per-chapter file (txt only)** — once a chapter completes, if `"txt"` is in
@@ -146,11 +159,22 @@ chapter markers. TTS does **not** count toward `total_steps` — it runs after
 the progress bar fills and reports via log lines only. An MP3 failure is
 logged but never fails the run (text outputs are already written).
 
+### After all chapters (book-wide key ideas)
+
+In `summarise_key_ideas` mode, if ≥2 chapters were processed, the worker makes
+one `build_book_key_ideas_prompt` call over the per-chapter key-idea sections
+(extracted from the result bodies, so it is resume-safe) and appends a final
+"Key ideas of the book / Ideas clave del libro" entry to `results`. Like TTS,
+this post-loop call is excluded from `total_steps` and reported via log only; a
+failure is logged but never fails the run.
+
 ### Progress bar
 
 `total_steps = len(chapters) * steps_per_chapter`
-where `steps_per_chapter` is **2** in `summarise_rewrite` mode and **1** in
-`translate` and `summarise_only` modes. This keeps the progress bar accurate regardless of mode.
+where `steps_per_chapter` is **2** in `summarise_rewrite` mode, **1** in
+`translate` and `summarise_only` modes, and for `summarise_key_ideas` **2**
+(English: summary + key ideas) or **3** (Spanish: summary + rewrite + key
+ideas). The book-wide synthesis call is excluded (post-loop, log-only).
 
 The log shows `Chapter 3.1/4`, `3.2/4` etc. when chunking is active.
 
