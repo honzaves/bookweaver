@@ -206,13 +206,16 @@ class BookWeaverApp(QMainWindow):
         self._mode_summarise = QRadioButton("Summarise → Rewrite in Spanish")
         self._mode_translate = QRadioButton("Full translation (no summarisation)")
         self._mode_summarise_only = QRadioButton("Summarise only  (English, no translation)")
+        self._mode_key_ideas = QRadioButton("Summary with key ideas")
         self._mode_summarise.setChecked(True)
         self._mode_group.addButton(self._mode_summarise)
         self._mode_group.addButton(self._mode_translate)
         self._mode_group.addButton(self._mode_summarise_only)
+        self._mode_group.addButton(self._mode_key_ideas)
         mode_row.addWidget(self._mode_summarise)
         mode_row.addWidget(self._mode_translate)
         mode_row.addWidget(self._mode_summarise_only)
+        mode_row.addWidget(self._mode_key_ideas)
         mode_row.addStretch()
         sl.addLayout(mode_row)
 
@@ -255,8 +258,32 @@ class BookWeaverApp(QMainWindow):
         self._summarise_only_note.setVisible(False)
         sl.addWidget(self._summarise_only_note)
 
+        # language toggle — only visible for the key-ideas mode
+        self._keyideas_lang_widget = QWidget()
+        kl = QHBoxLayout(self._keyideas_lang_widget)
+        kl.setContentsMargins(0, 0, 0, 0)
+        kl.addWidget(QLabel("Key-ideas output language:"))
+        self._keyideas_lang_group = QButtonGroup(self)
+        self._keyideas_lang_es = QRadioButton("Spanish (CEFR level)")
+        self._keyideas_lang_en = QRadioButton("English")
+        self._keyideas_lang_es.setChecked(True)
+        self._keyideas_lang_group.addButton(self._keyideas_lang_es)
+        self._keyideas_lang_group.addButton(self._keyideas_lang_en)
+        kl.addWidget(self._keyideas_lang_es)
+        kl.addWidget(self._keyideas_lang_en)
+        kl.addStretch()
+        self._keyideas_lang_widget.setVisible(False)
+        sl.addWidget(self._keyideas_lang_widget)
+
         # wire toggles
-        for btn in (self._mode_summarise, self._mode_translate, self._mode_summarise_only):
+        for btn in (
+            self._mode_summarise,
+            self._mode_translate,
+            self._mode_summarise_only,
+            self._mode_key_ideas,
+        ):
+            btn.toggled.connect(lambda _: self._on_mode_changed())
+        for btn in (self._keyideas_lang_es, self._keyideas_lang_en):
             btn.toggled.connect(lambda _: self._on_mode_changed())
 
         form.addWidget(grp)
@@ -533,23 +560,36 @@ class BookWeaverApp(QMainWindow):
                 self._voice_combo.currentData()
                 if self._mp3_chk.isChecked() else None
             ),
-            "target_lang": TARGET_LANG[mode],
+            "summary_lang": self._summary_target_lang(),
+            "target_lang": (
+                self._summary_target_lang()
+                if mode == "summarise_key_ideas" else TARGET_LANG[mode]
+            ),
         }
+
+    def _summary_target_lang(self) -> str:
+        """Effective output language for the key-ideas mode."""
+        return "en" if self._keyideas_lang_en.isChecked() else "es"
 
     def _selected_mode(self) -> str:
         if self._mode_translate.isChecked():
             return "translate"
         if self._mode_summarise_only.isChecked():
             return "summarise_only"
+        if self._mode_key_ideas.isChecked():
+            return "summarise_key_ideas"
         return "summarise_rewrite"
 
     def _on_mode_changed(self) -> None:
         """Show/hide controls based on selected processing mode."""
         translate = self._mode_translate.isChecked()
         summarise_only = self._mode_summarise_only.isChecked()
+        key_ideas = self._mode_key_ideas.isChecked()
+        # Reduction depth applies to every mode except full translation.
         self._summarisation_widget.setVisible(not translate)
         self._translate_note.setVisible(translate)
         self._summarise_only_note.setVisible(summarise_only)
+        self._keyideas_lang_widget.setVisible(key_ideas)
         # The voice combo is built in a later group than the mode radios.
         if hasattr(self, "_voice_combo"):
             self._rebuild_voice_combo()
@@ -557,7 +597,11 @@ class BookWeaverApp(QMainWindow):
     def _rebuild_voice_combo(self) -> None:
         """Repopulate the voice list for the current mode's target language,
         preserving the selection when the voice exists in both lists."""
-        lang = TARGET_LANG[self._selected_mode()]
+        mode = self._selected_mode()
+        lang = (
+            self._summary_target_lang()
+            if mode == "summarise_key_ideas" else TARGET_LANG[mode]
+        )
         previous = self._voice_combo.currentData()
         default = SETTINGS.get("tts", {}).get(f"default_voice_{lang}")
         self._voice_combo.clear()
