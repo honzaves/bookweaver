@@ -601,6 +601,25 @@ class ProcessingWorker(QThread):
         return chunks or [text]
 
     @staticmethod
+    def _extract_key_ideas(body: str, header: str) -> str:
+        """Return the key-ideas section of *body* (from the first occurrence
+        of *header* to the end), or the whole *body* if *header* is absent.
+        Reads from result bodies so it is correct on fresh and resumed runs."""
+        idx = body.find(header)
+        return body[idx:] if idx != -1 else body
+
+    @staticmethod
+    def _collect_chapter_ideas(
+        results: list[tuple[str, str]], header: str
+    ) -> str:
+        """Concatenate every chapter's key-ideas section for the book-wide
+        synthesis prompt."""
+        return "\n\n".join(
+            ProcessingWorker._extract_key_ideas(body, header)
+            for _, body in results
+        )
+
+    @staticmethod
     def _strip_asterisk_markers(text: str) -> str:
         """Remove *word* / *phrase* markers the LLM adds around proper nouns."""
         import re

@@ -501,3 +501,33 @@ class TestWriteChapterFile:
         w = _make_worker()
         out = w._write_chapter_file(tmp_path, "b", "B2", 0, "First", "x")
         assert out.name.startswith("01 - ")
+
+
+class TestExtractKeyIdeas:
+    def test_returns_section_from_header(self):
+        body = "Summary prose here.\n\nKey ideas\n- One.\n- Two."
+        out = ProcessingWorker._extract_key_ideas(body, "Key ideas")
+        assert out == "Key ideas\n- One.\n- Two."
+
+    def test_missing_header_returns_whole_body(self):
+        body = "Just a summary, no ideas section."
+        out = ProcessingWorker._extract_key_ideas(body, "Key ideas")
+        assert out == body
+
+    def test_spanish_header(self):
+        body = "Resumen.\n\nIdeas clave\n- Uno."
+        out = ProcessingWorker._extract_key_ideas(body, "Ideas clave")
+        assert out == "Ideas clave\n- Uno."
+
+
+class TestCollectChapterIdeas:
+    def test_joins_sections_only(self):
+        results = [
+            ("Chapter 1", "Prose A.\n\nKey ideas\n- A1."),
+            ("Chapter 2", "Prose B.\n\nKey ideas\n- B1."),
+        ]
+        out = ProcessingWorker._collect_chapter_ideas(results, "Key ideas")
+        assert out == "Key ideas\n- A1.\n\nKey ideas\n- B1."
+
+    def test_empty_results_returns_empty_string(self):
+        assert ProcessingWorker._collect_chapter_ideas([], "Key ideas") == ""
