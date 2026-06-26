@@ -88,7 +88,8 @@ class TestTargetLang:
 
     def test_covers_all_modes(self):
         assert set(TARGET_LANG) == {
-            "summarise_rewrite", "translate", "summarise_only"
+            "summarise_rewrite", "translate", "summarise_only",
+            "summarise_key_ideas",
         }
 
 

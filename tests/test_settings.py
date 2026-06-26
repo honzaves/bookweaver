@@ -214,3 +214,12 @@ class TestChapterTitlePreviewChars:
         _build(p)
         assert settings_module.SETTINGS["chapter_title_preview_chars"] == 80
         _build()  # restore
+
+
+# ──────────────────────────────────────────────────────────────
+#  TARGET_LANG
+# ──────────────────────────────────────────────────────────────
+class TestTargetLangKeyIdeas:
+    def test_summarise_key_ideas_default_es(self):
+        from settings import TARGET_LANG
+        assert TARGET_LANG["summarise_key_ideas"] == "es"

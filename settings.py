@@ -261,9 +261,10 @@ _build()
 # ──────────────────────────────────────────────────────────────
 # Target language of each processing mode's output text.
 TARGET_LANG = {
-    "summarise_rewrite": "es",
-    "translate":         "es",
-    "summarise_only":    "en",
+    "summarise_rewrite":   "es",
+    "translate":           "es",
+    "summarise_only":      "en",
+    "summarise_key_ideas": "es",
 }
 
 
