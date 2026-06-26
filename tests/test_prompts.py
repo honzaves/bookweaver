@@ -19,6 +19,9 @@ from prompts import (
     _creativity_instruction,
     build_rewrite_prompt,
     build_summary_prompt,
+    build_key_ideas_prompt,
+    KEY_IDEAS_HEADER,
+    BOOK_KEY_IDEAS_HEADER,
 )
 
 
@@ -232,3 +235,51 @@ class TestLevelGuidance:
         c2 = _LEVEL_GUIDANCE["C2"].lower()
         assert any(w in b1 for w in ("simple", "short", "high-frequency", "basic"))
         assert any(w in c2 for w in ("native", "literary", "complex", "full command"))
+
+
+# ──────────────────────────────────────────────────────────────
+#  Key-ideas headers
+# ──────────────────────────────────────────────────────────────
+class TestKeyIdeasHeaders:
+    def test_chapter_headers_present(self):
+        assert KEY_IDEAS_HEADER["en"] == "Key ideas"
+        assert KEY_IDEAS_HEADER["es"] == "Ideas clave"
+
+    def test_book_headers_present(self):
+        assert BOOK_KEY_IDEAS_HEADER["en"] == "Key ideas of the book"
+        assert BOOK_KEY_IDEAS_HEADER["es"] == "Ideas clave del libro"
+
+
+class TestBuildKeyIdeasPrompt:
+    SUMMARY = "Alice met a rabbit and followed it underground."
+
+    def test_summary_text_present(self):
+        assert self.SUMMARY in build_key_ideas_prompt(self.SUMMARY, "en")
+
+    def test_english_header_in_prompt(self):
+        assert "Key ideas" in build_key_ideas_prompt(self.SUMMARY, "en")
+
+    def test_spanish_header_in_prompt(self):
+        assert "Ideas clave" in build_key_ideas_prompt(self.SUMMARY, "es", "B2")
+
+    def test_at_most_five_rule_present(self):
+        p = build_key_ideas_prompt(self.SUMMARY, "en")
+        assert "FIVE" in p or "five" in p
+
+    def test_at_least_one_rule_present(self):
+        p = build_key_ideas_prompt(self.SUMMARY, "en")
+        assert "AT LEAST ONE" in p or "at least one" in p.lower()
+
+    def test_two_sentence_limit_present(self):
+        assert "2 sentences" in build_key_ideas_prompt(self.SUMMARY, "en")
+
+    def test_spanish_applies_cefr_guidance(self):
+        p = build_key_ideas_prompt(self.SUMMARY, "es", "B1")
+        assert _LEVEL_GUIDANCE["B1"] in p
+
+    def test_english_does_not_inject_spanish_guidance(self):
+        p = build_key_ideas_prompt(self.SUMMARY, "en")
+        assert _LEVEL_GUIDANCE["B1"] not in p
+
+    def test_proper_noun_rule_present(self):
+        assert "proper noun" in build_key_ideas_prompt(self.SUMMARY, "en").lower()

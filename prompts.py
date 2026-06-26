@@ -178,3 +178,55 @@ def build_rewrite_prompt(
         f"- This is chapter {chapter_index + 1}.\n\n"
         f"SOURCE SUMMARY (English):\n{summary}\n"
     )
+
+
+# ──────────────────────────────────────────────────────────────
+#  KEY-IDEAS HEADERS  (single source of truth — used by the prompt
+#  builders for instruction text and by the worker for rendering
+#  and extraction)
+# ──────────────────────────────────────────────────────────────
+KEY_IDEAS_HEADER: dict[str, str] = {"en": "Key ideas", "es": "Ideas clave"}
+BOOK_KEY_IDEAS_HEADER: dict[str, str] = {
+    "en": "Key ideas of the book",
+    "es": "Ideas clave del libro",
+}
+
+
+def _key_ideas_lang_line(lang: str, level: str) -> str:
+    """Shared language directive for the key-idea builders."""
+    if lang == "es":
+        guidance = _LEVEL_GUIDANCE.get(level, _LEVEL_GUIDANCE["B2"])
+        return (
+            f"Write entirely in Spanish at CEFR {level}.\n"
+            f"LANGUAGE GUIDANCE: {guidance}"
+        )
+    return "Write entirely in English."
+
+
+def build_key_ideas_prompt(
+    summary_text: str,
+    lang: str,
+    level: str = "B2",
+) -> str:
+    """
+    Return a prompt asking the LLM to extract 1–5 key ideas from
+    *summary_text*, each a bullet plus a ≤2-sentence explanation, written
+    in *lang* (`"en"` or `"es"` at CEFR *level*). Output begins with the
+    localized chapter header so the worker can render and later locate it.
+    """
+    header = KEY_IDEAS_HEADER.get(lang, KEY_IDEAS_HEADER["en"])
+    return (
+        "You are a precise literary analyst. Identify the key ideas or key "
+        "moments of the following chapter summary.\n\n"
+        "RULES:\n"
+        "- Identify AT LEAST ONE and AT MOST FIVE key ideas. Only include an "
+        "idea if it is genuinely important; never pad to reach five.\n"
+        f"- Begin your output with this exact header line on its own: {header}\n"
+        "- Then list each idea as a bullet starting with '- '. After the idea "
+        "statement, add a short explanation of NO MORE THAN 2 sentences.\n"
+        f"- {_key_ideas_lang_line(lang, level)}\n"
+        "- Do NOT translate proper nouns: keep character, place, and "
+        "organisation names exactly as written.\n"
+        "- Output ONLY the header and the bullet list — no other commentary.\n\n"
+        f"CHAPTER SUMMARY:\n{summary_text}\n"
+    )
