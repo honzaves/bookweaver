@@ -20,6 +20,7 @@ from prompts import (
     build_rewrite_prompt,
     build_summary_prompt,
     build_key_ideas_prompt,
+    build_book_key_ideas_prompt,
     KEY_IDEAS_HEADER,
     BOOK_KEY_IDEAS_HEADER,
 )
@@ -283,3 +284,29 @@ class TestBuildKeyIdeasPrompt:
 
     def test_proper_noun_rule_present(self):
         assert "proper noun" in build_key_ideas_prompt(self.SUMMARY, "en").lower()
+
+
+class TestBuildBookKeyIdeasPrompt:
+    IDEAS = "Key ideas\n- Alice is curious.\n- The rabbit leads her on."
+
+    def test_ideas_text_present(self):
+        assert self.IDEAS in build_book_key_ideas_prompt(self.IDEAS, "en")
+
+    def test_book_wide_range_present(self):
+        p = build_book_key_ideas_prompt(self.IDEAS, "en")
+        assert "5" in p and "7" in p
+
+    def test_two_sentence_limit_present(self):
+        assert "2 sentences" in build_book_key_ideas_prompt(self.IDEAS, "en")
+
+    def test_does_not_emit_book_header_line(self):
+        # The header is applied as the entry title by the worker, not the body.
+        p = build_book_key_ideas_prompt(self.IDEAS, "en")
+        assert "Begin your output" not in p
+
+    def test_spanish_applies_cefr_guidance(self):
+        p = build_book_key_ideas_prompt(self.IDEAS, "es", "C1")
+        assert _LEVEL_GUIDANCE["C1"] in p
+
+    def test_english_writes_in_english(self):
+        assert "Write entirely in English." in build_book_key_ideas_prompt(self.IDEAS, "en")

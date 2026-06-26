@@ -230,3 +230,31 @@ def build_key_ideas_prompt(
         "- Output ONLY the header and the bullet list — no other commentary.\n\n"
         f"CHAPTER SUMMARY:\n{summary_text}\n"
     )
+
+
+def build_book_key_ideas_prompt(
+    chapter_ideas_text: str,
+    lang: str,
+    level: str = "B2",
+) -> str:
+    """
+    Return a prompt that synthesises the most important book-wide ideas
+    (5–7) from *chapter_ideas_text* (the concatenated per-chapter key-idea
+    sections). Each idea is a bullet plus a ≤2-sentence explanation, in
+    *lang*. The book header is NOT emitted here — the worker applies it as
+    the result entry's title.
+    """
+    return (
+        "You are a precise literary analyst. Below are the key ideas collected "
+        "from every chapter of a book. Synthesise the MOST IMPORTANT ideas "
+        "across the whole book.\n\n"
+        "RULES:\n"
+        "- Identify between 5 and 7 of the most important, book-wide ideas. "
+        "Merge related chapter ideas; do not simply repeat them verbatim.\n"
+        "- List each idea as a bullet starting with '- '. After the idea "
+        "statement, add a short explanation of NO MORE THAN 2 sentences.\n"
+        f"- {_key_ideas_lang_line(lang, level)}\n"
+        "- Do NOT translate proper nouns.\n"
+        "- Output ONLY the bullet list — no header line, no other commentary.\n\n"
+        f"PER-CHAPTER KEY IDEAS:\n{chapter_ideas_text}\n"
+    )
