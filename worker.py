@@ -17,7 +17,15 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from prompts import build_summary_prompt, build_rewrite_prompt, build_translation_prompt
+from prompts import (
+    build_summary_prompt,
+    build_rewrite_prompt,
+    build_translation_prompt,
+    build_key_ideas_prompt,
+    build_book_key_ideas_prompt,
+    KEY_IDEAS_HEADER,
+    BOOK_KEY_IDEAS_HEADER,
+)
 from settings import creativity_to_temperature, OLLAMA_TIMEOUT, SETTINGS
 
 
@@ -85,6 +93,7 @@ class ProcessingWorker(QThread):
         creativity = cfg["creativity"]
         temperature = creativity_to_temperature(creativity)
         mode = cfg.get("mode", "summarise_rewrite")  # or "translate"
+        summary_lang = cfg.get("summary_lang", "es")
         resume_from = cfg.get("resume_from", 0)
         meta = {
             "title": cfg.get("meta_title") or Path(epub_path).stem,
@@ -121,7 +130,13 @@ class ProcessingWorker(QThread):
                 f"{len(all_chapters)} chapters.", "info"
             )
 
-        steps_per_chapter = 1 if mode in ("translate", "summarise_only") else 2
+        if mode == "summarise_key_ideas":
+            # summary (+ rewrite for Spanish) + 1 key-ideas call per chapter
+            steps_per_chapter = 3 if summary_lang == "es" else 2
+        elif mode in ("translate", "summarise_only"):
+            steps_per_chapter = 1
+        else:
+            steps_per_chapter = 2
         total_steps = len(chapters) * steps_per_chapter
         out_formats = out_format if isinstance(out_format, list) else [out_format]
         stem = Path(epub_path).stem
@@ -210,6 +225,54 @@ class ProcessingWorker(QThread):
                         return
                     spanish_parts.append(summary)
 
+                elif mode == "summarise_key_ideas":
+                    # Summary path mirrors English (summarise_only) or Spanish
+                    # (summarise→rewrite) depending on summary_lang. Key ideas
+                    # are extracted once per chapter, after the chunk loop.
+                    self.log.emit(
+                        f"\n── Chapter {chunk_label}/{len(chapters)}: summarising…",
+                        "info",
+                    )
+                    summary = self._ollama_call(
+                        model,
+                        build_summary_prompt(chunk, keep_pct),
+                        label=f"Summary {chunk_label}",
+                        temperature=temperature,
+                    )
+                    if summary is None:
+                        self.completed_results = results
+                        self.failed_at_chapter = idx
+                        self.finished.emit(False, "")
+                        return
+
+                    if summary_lang == "es":
+                        if self._abort:
+                            self.completed_results = results
+                            self.failed_at_chapter = idx
+                            self.log.emit("⛔  Aborted by user.", "warning")
+                            self.finished.emit(False, "")
+                            return
+                        self.log.emit(
+                            f"── Chapter {chunk_label}/{len(chapters)}: "
+                            f"rewriting in Spanish ({level}, "
+                            f"creativity {creativity}/10)…",
+                            "info",
+                        )
+                        rewritten = self._ollama_call(
+                            model,
+                            build_rewrite_prompt(summary, level, idx, creativity),
+                            label=f"Rewrite {chunk_label}",
+                            temperature=temperature,
+                        )
+                        if rewritten is None:
+                            self.completed_results = results
+                            self.failed_at_chapter = idx
+                            self.finished.emit(False, "")
+                            return
+                        spanish_parts.append(self._strip_asterisk_markers(rewritten))
+                    else:
+                        spanish_parts.append(summary)
+
                 else:
                     # ── Summarise → Rewrite (original two-step pipeline) ──
                     # ── step 1: summarise ─────────────────────────────
@@ -255,22 +318,92 @@ class ProcessingWorker(QThread):
 
                     spanish_parts.append(self._strip_asterisk_markers(spanish))
 
+            chapter_body = "\n\n".join(spanish_parts)
+
+            # For the key-ideas mode, append a key-ideas section to the body.
+            if mode == "summarise_key_ideas":
+                self.log.emit(
+                    f"── Chapter {idx + 1}/{len(chapters)}: extracting key ideas…",
+                    "info",
+                )
+                ideas = self._ollama_call(
+                    model,
+                    build_key_ideas_prompt(chapter_body, summary_lang, level),
+                    label=f"Key ideas {idx + 1}",
+                    temperature=temperature,
+                )
+                if ideas is None:
+                    self.completed_results = results
+                    self.failed_at_chapter = idx
+                    self.finished.emit(False, "")
+                    return
+                ideas = (
+                    self._strip_asterisk_markers(ideas)
+                    if summary_lang == "es" else ideas
+                )
+                chapter_body = f"{chapter_body}\n\n{ideas.strip()}"
+
             step += steps_per_chapter
             self.progress.emit(step, total_steps)
-            ch_title = f"Chapter {idx + 1}" if mode == "summarise_only" else f"Capítulo {idx + 1}"
-            results.append((ch_title, "\n\n".join(spanish_parts)))
+            if mode == "summarise_only" or (
+                mode == "summarise_key_ideas" and summary_lang == "en"
+            ):
+                ch_title = f"Chapter {idx + 1}"
+            else:
+                ch_title = f"Capítulo {idx + 1}"
+            results.append((ch_title, chapter_body))
             self.completed_results = results[:]
             if "txt" in out_formats:
                 self._write_chapter_file(
                     out_folder, stem, level,
                     chapter.index, chapter.title,
-                    "\n\n".join(spanish_parts),
+                    chapter_body,
                 )
             self.log.emit(f"✅  Chapter {idx + 1} done.", "success")
 
+        # ── book-wide key ideas (only if ≥ 2 chapters were processed) ──
+        if mode == "summarise_key_ideas" and len(results) >= 2:
+            ch_header = KEY_IDEAS_HEADER.get(summary_lang, KEY_IDEAS_HEADER["en"])
+            book_header = BOOK_KEY_IDEAS_HEADER.get(
+                summary_lang, BOOK_KEY_IDEAS_HEADER["en"]
+            )
+            self.log.emit("\n🧩  Synthesising book-wide key ideas…", "info")
+            ideas_text = self._collect_chapter_ideas(results, ch_header)
+            book = self._ollama_call(
+                model,
+                build_book_key_ideas_prompt(ideas_text, summary_lang, level),
+                label="Book key ideas",
+                temperature=temperature,
+            )
+            if book:
+                book_body = (
+                    self._strip_asterisk_markers(book)
+                    if summary_lang == "es" else book
+                ).strip()
+                results.append((book_header, book_body))
+                self.completed_results = results[:]
+                if "txt" in out_formats:
+                    # index len(all_chapters) keeps the NN prefix after the
+                    # last chapter; title is the localized book header.
+                    self._write_chapter_file(
+                        out_folder, stem, level,
+                        len(all_chapters), book_header, book_body,
+                    )
+                self.log.emit("🧩  Book-wide key ideas added.", "success")
+            else:
+                self.log.emit(
+                    "Book key-ideas synthesis failed; continuing without it.",
+                    "warning",
+                )
+
         # ── write output ──────────────────────────────────────
         out_folder.mkdir(parents=True, exist_ok=True)
-        lang_label = "English summary" if mode == "summarise_only" else f"Spanish {level}"
+        if mode == "summarise_only" or (
+            mode == "summarise_key_ideas" and summary_lang == "en"
+        ):
+            lang_label = "English summary"
+        else:
+            lang_label = f"Spanish {level}"
         out_paths = []
 
         for fmt in out_formats:
