@@ -60,10 +60,8 @@ class ProcessingWorker(QThread):
     # ── main entry point ──────────────────────────────────────
     def run(self) -> None:
         try:
-            import ebooklib
             from ebooklib import epub as ebooklib_epub
             import httpx
-            from bs4 import BeautifulSoup
             import epub_io
         except ImportError as exc:
             self.log.emit(
