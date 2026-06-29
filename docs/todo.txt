@@ -1,0 +1,6 @@
+Redo the UI flow
+- select mode in dropdown
+- choose options
+
+UI doesn't fit all components on load
+UI spacing chapters list
