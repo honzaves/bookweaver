@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#0a0a08;font-family:-apple-system,"Helvetica Neue",Helvetica,system-ui,sans-serif;color:#e8e4d9}
+  *{box-sizing:border-box}
+  .stage{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:14px;padding:30px 24px 40px;background:radial-gradient(120% 80% at 50% -10%,#16150f 0%,#0a0a08 60%)}
+  .cap{font:12px/1.4 ui-monospace,Menlo,monospace;color:#6c6a62;letter-spacing:.02em}
+  .cap b{color:#d4a853;font-weight:600}
+
+  /* window */
+  .win{width:860px;height:724px;background:#111210;border:1px solid #2e2f2a;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 30px 70px -20px rgba(0,0,0,.7),0 0 0 1px rgba(212,168,83,.04)}
+  .bar{height:38px;flex:none;display:flex;align-items:center;gap:8px;padding:0 14px;background:#1a1b18;border-bottom:1px solid #2e2f2a}
+  .dot{width:11px;height:11px;border-radius:50%;background:#34352e}
+  .bar small{margin-left:10px;color:#6c6a62;font:11px ui-monospace,Menlo,monospace}
+
+  .hd{padding:17px 26px 0;flex:none}
+  .ttl{font:700 19px/1 system-ui;letter-spacing:-.5px;color:#d4a853}
+  .sub{font:12px/1.3 system-ui;color:#7a7870;margin-top:5px}
+  .rule{height:2px;background:linear-gradient(90deg,#d4a853,rgba(212,168,83,0) 70%);margin:13px 0 0;border-radius:2px}
+
+  /* step rail */
+  .rail{display:flex;align-items:center;gap:9px;padding:16px 26px 4px;flex:none}
+  .step{display:flex;align-items:center;gap:8px;font:12.5px/1 system-ui;color:#7a7870;cursor:pointer;user-select:none}
+  .step .n{width:23px;height:23px;border-radius:50%;border:1px solid #3a3b34;display:flex;align-items:center;justify-content:center;font:12px ui-monospace;color:#7a7870;transition:.15s}
+  .step:hover .n{border-color:#55564d}
+  .step.done{color:#cfc9ba}
+  .step.done .n{background:#26271f;color:#cfc9ba;border-color:#3a3b34}
+  .step.act{color:#d4a853;font-weight:600}
+  .step.act .n{background:#d4a853;color:#191610;border-color:#d4a853;font-weight:700}
+  .stepln{flex:1;height:1px;background:#2e2f2a;min-width:16px}
+  .recap{padding:3px 26px 0;font:11.5px/1.4 system-ui;color:#6c6a62;flex:none;display:flex;gap:6px;align-items:center}
+  .recap b{color:#b6b1a4;font-weight:500}
+  .recap a{color:#d4a853;text-decoration:none;cursor:pointer;border-bottom:1px dotted #8a6a2e}
+
+  /* content */
+  .body{flex:1;overflow-y:auto;padding:18px 26px 22px}
+  .body::-webkit-scrollbar{width:10px}
+  .body::-webkit-scrollbar-thumb{background:#2a2b25;border-radius:99px;border:3px solid #111210}
+  .stack{display:flex;flex-direction:column;gap:13px}
+
+  /* group card */
+  .gc{background:#1a1b18;border:1px solid #2e2f2a;border-radius:9px;padding:13px 14px}
+  .gct{font:600 9.5px/1 system-ui;letter-spacing:.14em;text-transform:uppercase;color:#8a8678;margin-bottom:11px;display:flex;justify-content:space-between;align-items:center}
+  .gct .meta{font:400 10.5px/1 ui-monospace;letter-spacing:0;text-transform:none;color:#6c6a62}
+
+  /* fields / inputs */
+  .field{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #36372f;background:#0f0f0c;border-radius:7px;padding:9px 11px;color:#cfc9ba;font:12.5px ui-monospace,Menlo,monospace}
+  .field.path{color:#9a978c}
+  .drop{cursor:pointer;transition:.15s}
+  .drop:hover{border-color:#55564d}
+  .drop .cv{color:#7a7870;font-size:11px}
+  .row{display:flex;gap:11px}
+  .lbl{font:11px/1.3 system-ui;color:#8a8678;margin-bottom:6px}
+
+  .btn{border:1px solid #3a3b34;background:#24241c;border-radius:7px;padding:8px 13px;color:#cfc9ba;font:12px system-ui;cursor:pointer;white-space:nowrap;transition:.15s}
+  .btn:hover{border-color:#55564d;background:#2a2a20}
+  .btn.am{background:#d4a853;color:#191610;border:none;font-weight:600}
+  .btn.am:hover{background:#deb469}
+  .btn.am.dis{background:#3a3528;color:#6c6453;cursor:default}
+  .btn.red{background:#23130f;border-color:#5a3127;color:#c0604a}
+  .btn.red:hover{background:#2c1612}
+  .btn.red.dis{opacity:.4;cursor:default;background:#23130f}
+  .btn.gho{background:transparent;border-color:transparent;color:#7a7870;padding-left:6px;padding-right:6px}
+  .btn.gho:hover{color:#cfc9ba;background:transparent}
+
+  /* checkbox */
+  .chk{display:inline-flex;gap:9px;align-items:center;font:13px/1.4 system-ui;color:#d6d1c4;cursor:pointer;user-select:none}
+  .cbox{width:17px;height:17px;border-radius:5px;border:1.5px solid #4a4b42;display:flex;align-items:center;justify-content:center;font-size:11px;color:#191610;flex:none;transition:.12s}
+  .chk.on .cbox{background:#d4a853;border-color:#d4a853}
+  .chk.part .cbox{background:#3a3528;border-color:#8a6a2e;color:#d4a853}
+  .chk.dis{color:#5b594f;cursor:default}
+  .chk.dis .cbox{border-color:#34352e}
+
+  /* mode tiles */
+  .modes{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .tile{display:flex;flex-direction:column;gap:5px;padding:12px 13px;border:1px solid #2e2f2a;border-radius:9px;background:#15150f;cursor:pointer;transition:.15s}
+  .tile:hover{border-color:#454640}
+  .tile.sel{border-color:#d4a853;background:#211c12;box-shadow:inset 0 0 0 1px rgba(212,168,83,.25)}
+  .tile .th{display:flex;gap:9px;align-items:center}
+  .rd{width:16px;height:16px;border-radius:50%;border:1.5px solid #4a4b42;flex:none;display:flex;align-items:center;justify-content:center}
+  .rd i{width:8px;height:8px;border-radius:50%;background:#d4a853;display:none}
+  .tile.sel .rd{border-color:#d4a853}
+  .tile.sel .rd i{display:block}
+  .tt{font:600 13px/1.2 system-ui;color:#e4dfd2}
+  .td{font:11px/1.35 system-ui;color:#7a7870;padding-left:25px}
+
+  /* note banners */
+  .note{display:flex;gap:9px;font:12px/1.45 system-ui;padding:10px 12px;border-radius:8px;border:1px solid;align-items:flex-start}
+  .note.info{border-color:#33342d;background:#16160f;color:#9a978c}
+  .note.tip{border-color:#3a4a36;background:#141b12;color:#9fc093}
+
+  /* slider */
+  .sld{position:relative;height:26px;margin:2px 2px 0}
+  .track{position:absolute;left:0;right:0;top:50%;height:6px;transform:translateY(-50%);border-radius:99px;background:#2a2b24;overflow:hidden}
+  .ticks{position:absolute;left:0;right:0;top:50%;height:11px;transform:translateY(-50%);background-image:repeating-linear-gradient(90deg,transparent 0,transparent calc(var(--tk) - 1px),#3a3b34 calc(var(--tk) - 1px),#3a3b34 var(--tk));pointer-events:none;opacity:.7}
+  .fill{position:absolute;left:0;top:0;bottom:0;border-radius:99px}
+  .knob{position:absolute;top:50%;width:17px;height:17px;border-radius:50%;background:#d4a853;border:2px solid #15150f;transform:translate(-50%,-50%);box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none}
+  .rng{position:absolute;inset:0;width:100%;margin:0;background:transparent;-webkit-appearance:none;appearance:none;cursor:pointer}
+  .rng::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:transparent}
+  .rng::-moz-range-thumb{width:22px;height:22px;border:none;background:transparent}
+  .read{font:12px ui-monospace,Menlo,monospace}
+  .sweet{font:9.5px/1 ui-monospace;padding:4px 7px;border-radius:99px;border:1px solid #3a4a36;color:#7aab6e;background:#141b12}
+  .leg{font:10.5px/1.45 system-ui;color:#7a7870}
+  .scalerow{display:flex;justify-content:space-between;font:9.5px ui-monospace;color:#55564d;margin-top:7px}
+
+  /* chapters list */
+  .chaps{border:1px solid #2e2f2a;border-radius:8px;background:#0f0f0c;max-height:188px;overflow-y:auto;padding:4px}
+  .chaps::-webkit-scrollbar{width:9px}
+  .chaps::-webkit-scrollbar-thumb{background:#2a2b25;border-radius:99px;border:2px solid #0f0f0c}
+  .crow{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:6px;cursor:pointer;font:12.5px/1.3 system-ui;color:#cfc9ba}
+  .crow:hover{background:#181812}
+  .crow .num{font:11px ui-monospace;color:#6c6a62;min-width:20px}
+
+  /* run console */
+  .console{display:flex;flex-direction:column;gap:14px;height:100%}
+  .progwrap{display:flex;align-items:center;gap:13px}
+  .prog{flex:1;height:8px;border-radius:99px;background:#26271f;overflow:hidden}
+  .prog i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#8a6a2e,#d4a853);transition:width .4s}
+  .pct{font:12px ui-monospace;color:#cfc9ba;min-width:42px;text-align:right}
+  .log{flex:1;background:#0c0c09;border:1px solid #2e2f2a;border-radius:9px;padding:13px 15px;font:12px/1.7 ui-monospace,Menlo,monospace;overflow-y:auto}
+  .log::-webkit-scrollbar{width:9px}.log::-webkit-scrollbar-thumb{background:#2a2b25;border-radius:99px;border:2px solid #0c0c09}
+  .li-info{color:#9a978c}.li-mut{color:#5b594f}.li-ok{color:#7aab6e}.li-warn{color:#c98d3a}.li-err{color:#c0604a}.li-head{color:#cfc9ba}
+  .seg{display:inline-flex;border:1px solid #2e2f2a;border-radius:8px;overflow:hidden;background:#15150f}
+  .seg button{border:none;background:transparent;color:#7a7870;font:11px system-ui;padding:6px 11px;cursor:pointer;border-right:1px solid #2e2f2a}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:#26271f;color:#e4dfd2}
+
+  /* footer */
+  .foot{flex:none;border-top:1px solid #2e2f2a;background:#16160f;padding:13px 26px;display:flex;align-items:center;gap:14px}
+  .drawer{display:flex;align-items:center;gap:10px;flex:1;color:#7a7870;font:11.5px system-ui}
+  .pill{display:inline-flex;align-items:center;gap:6px;font:10px ui-monospace;color:#7a7870;border:1px solid #2e2f2a;border-radius:99px;padding:4px 9px}
+  .anno{font:600 16px/1.1 'Caveat',cursive;color:#c19a52}
+
+  .indent{margin-left:26px;padding-left:14px;border-left:1px solid #2e2f2a}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+</style>
+</helmet>
+
+<div class="stage">
+  <div class="cap">BookWeaver · <b>Guided Wizard</b> · hi-fi · click the steps ① ② ③ ④ to navigate</div>
+
+  <div class="win">
+    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><small>BookWeaver</small></div>
+    <div class="hd"><div class="ttl">BookWeaver</div><div class="sub">EPUB → Spanish rewriter via Ollama</div><div class="rule"></div></div>
+
+    <!-- step rail -->
+    <div class="rail">
+      <div class="step {{ r1 }}" onClick="{{ goS1 }}"><span class="n">{{ b1 }}</span>Book</div><div class="stepln"></div>
+      <div class="step {{ r2 }}" onClick="{{ goS2 }}"><span class="n">{{ b2 }}</span>Transform</div><div class="stepln"></div>
+      <div class="step {{ r3 }}" onClick="{{ goS3 }}"><span class="n">{{ b3 }}</span>Output</div><div class="stepln"></div>
+      <div class="step {{ r4 }}" onClick="{{ goS4 }}"><span class="n">{{ b4 }}</span>Run</div>
+    </div>
+    <sc-if value="{{ showRecap }}">
+      <div class="recap">Step 1 · <b>middlemarch.epub</b> · {{ totalCh }} chapters · Gemma 4 31B · B2 <a onClick="{{ goS1 }}">edit</a></div>
+    </sc-if>
+
+    <!-- ===== STEP 1 · BOOK ===== -->
+    <sc-if value="{{ isS1 }}" hint-placeholder-val="{{ true }}">
+      <div class="body"><div class="stack">
+        <div class="anno" style="margin:-2px 0 2px">which book, and how much of it?</div>
+        <div class="gc">
+          <div class="gct">EPUB file</div>
+          <div class="row"><div class="field path" style="flex:1">~/Books/eliot/middlemarch.epub</div><div class="btn" style="align-self:stretch">Browse…</div></div>
+          <div class="leg" style="margin-top:8px">Selecting a file reads title, author &amp; chapters, and pre-fills the output folder.</div>
+        </div>
+        <div class="gc">
+          <div class="gct">Chapters <span class="meta">{{ chapCount }} selected</span></div>
+          <div class="chk {{ allCls }}" onClick="{{ toggleAll }}" style="margin-bottom:8px;font-size:12px;color:#9a978c"><span class="cbox">{{ allGlyph }}</span>Select all</div>
+          <div class="chaps">
+            <sc-for list="{{ chapters }}" as="ch" hint-placeholder-count="8">
+              <div class="crow" onClick="{{ ch.onToggle }}">
+                <span class="chk {{ ch.cls }}" style="pointer-events:none"><span class="cbox">{{ ch.glyph }}</span></span>
+                <span class="num">{{ ch.num }}</span>{{ ch.title }}
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div class="row">
+          <div class="gc" style="flex:1"><div class="gct">Ollama model</div><div class="field drop">Gemma 4 31B (recommended) <span class="cv">▾</span></div></div>
+          <div class="gc" style="flex:1"><div class="gct">Spanish level</div><div class="field drop">B2 — Vantage <span class="cv">▾</span></div></div>
+        </div>
+      </div></div>
+    </sc-if>
+
+    <!-- ===== STEP 2 · TRANSFORM ===== -->
+    <sc-if value="{{ isS2 }}">
+      <div class="body"><div class="stack">
+        <div class="anno" style="margin:-2px 0 2px">how should we transform it?</div>
+        <div class="modes">
+          <div class="tile {{ mSR }}" onClick="{{ setSR }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Summarise → rewrite</span></div><div class="td">condense, then retell in Spanish at your level</div></div>
+          <div class="tile {{ mFull }}" onClick="{{ setFull }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Full translation</span></div><div class="td">whole text, nothing cut — slower</div></div>
+          <div class="tile {{ mSum }}" onClick="{{ setSum }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Summarise only (EN)</span></div><div class="td">condensed English, no translation</div></div>
+          <div class="tile {{ mKey }}" onClick="{{ setKey }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Summary + key ideas</span></div><div class="td">+ a book-wide synthesis at the end</div></div>
+        </div>
+
+        <sc-if value="{{ showFullNote }}"><div class="note info">⚠️ Full text is translated directly — expect longer model calls. Consider raising the timeout in step 3.</div></sc-if>
+        <sc-if value="{{ showSumNote }}"><div class="note info">📝 Output is saved as condensed English — no Spanish translation step runs.</div></sc-if>
+        <sc-if value="{{ showKeyToggle }}">
+          <div class="gc"><div class="gct">Key-ideas output language</div>
+            <div class="row"><div class="tile {{ klEs }}" style="flex:1" onClick="{{ setKlEs }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Spanish (at B2)</span></div></div><div class="tile {{ klEn }}" style="flex:1" onClick="{{ setKlEn }}"><div class="th"><span class="rd"><i></i></span><span class="tt">English</span></div></div></div>
+            <div class="leg" style="margin-top:8px">Changing this re-populates the MP3 voice list in step 3.</div>
+          </div>
+        </sc-if>
+
+        <div class="grid2">
+          <sc-if value="{{ showDepth }}">
+            <div class="gc">
+              <div class="gct">Summarisation depth</div>
+              <div class="sld" style="--tk:11.11%"><div class="track"><div class="fill" style="{{ keepFill }}"></div></div><div class="ticks"></div><div class="knob" style="{{ keepKnob }}"></div><input class="rng" type="range" min="10" max="90" step="10" value="{{ keep }}" onInput="{{ onKeep }}"></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+                <span class="read" style="{{ keepReadStyle }}">{{ keepReadout }}</span>
+                <sc-if value="{{ keepSweet }}"><span class="sweet">✦ sweet spot</span></sc-if>
+              </div>
+              <div class="scalerow"><span>10%</span><span>90%</span></div>
+              <div class="leg" style="margin-top:6px">🟢 30–50% keeps the core story without noise</div>
+            </div>
+          </sc-if>
+          <div class="gc">
+            <div class="gct">Creativity</div>
+            <div class="sld" style="--tk:10%"><div class="track"><div class="fill" style="{{ crFill }}"></div></div><div class="ticks"></div><div class="knob" style="{{ crKnob }}"></div><input class="rng" type="range" min="1" max="10" step="1" value="{{ creativity }}" onInput="{{ onCr }}"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+              <span class="read" style="{{ crReadStyle }}">{{ crReadout }}</span>
+              <sc-if value="{{ crSweet }}"><span class="sweet">✦ sweet spot</span></sc-if>
+            </div>
+            <div class="scalerow"><span>1 · Verbatim</span><span>Unbound · 10</span></div>
+            <div class="leg" style="margin-top:6px">🟢 5–6 adds vivid prose without inventing plot</div>
+          </div>
+        </div>
+      </div></div>
+    </sc-if>
+
+    <!-- ===== STEP 3 · OUTPUT ===== -->
+    <sc-if value="{{ isS3 }}">
+      <div class="body"><div class="stack">
+        <div class="anno" style="margin:-2px 0 2px">where should it go?</div>
+        <div class="gc">
+          <div class="gct">Output formats <span class="meta">at least one</span></div>
+          <div class="row" style="gap:20px">
+            <div class="chk {{ fTxt }}" onClick="{{ tgTxt }}"><span class="cbox">✓</span>Plain text (.txt)</div>
+            <div class="chk {{ fEpub }}" onClick="{{ tgEpub }}"><span class="cbox">✓</span>EPUB (.epub)</div>
+            <div class="chk {{ fHtml }}" onClick="{{ tgHtml }}"><span class="cbox">✓</span>HTML (.html)</div>
+          </div>
+          <div class="chk {{ mp3Cls }}" onClick="{{ tgMp3 }}" style="margin-top:14px"><span class="cbox">✓</span>Generate MP3 audiobook (Kokoro TTS)</div>
+          <sc-if value="{{ mp3NeedTxt }}"><div class="leg" style="margin-left:26px;margin-top:6px;color:#c98d3a">Requires Plain text (.txt) to be selected.</div></sc-if>
+          <sc-if value="{{ showVoice }}">
+            <div class="indent" style="margin-top:10px"><div class="lbl">Voice</div><div class="field drop" style="max-width:280px">Mateo — es · warm <span class="cv">▾</span></div></div>
+          </sc-if>
+        </div>
+
+        <div class="gc">
+          <div class="gct">Output folder</div>
+          <div class="row"><div class="field path" style="flex:1">~/Books/eliot/</div><div class="btn">Browse…</div></div>
+        </div>
+
+        <sc-if value="{{ showEpubMeta }}">
+          <div class="gc">
+            <div class="gct">EPUB metadata</div>
+            <div class="grid2" style="gap:11px">
+              <div><div class="lbl">Title</div><div class="field">Middlemarch</div></div>
+              <div><div class="lbl">Author</div><div class="field">George Eliot</div></div>
+              <div><div class="lbl">Language</div><div class="field">es</div></div>
+              <div><div class="lbl">Contributor</div><div class="field path">translator / editor</div></div>
+            </div>
+          </div>
+        </sc-if>
+
+        <div class="row">
+          <div class="gc" style="flex:1"><div class="gct">Timeout per call</div><div class="field">1200 s <span class="cv" style="color:#7a7870">▴▾</span></div><div class="leg" style="margin-top:7px">30–3600 s · raise for Full translation</div></div>
+          <div class="gc" style="flex:1"><div class="gct">Chunk size</div><div class="field">2000 words <span class="cv" style="color:#7a7870">▴▾</span></div><div class="leg" style="margin-top:7px">200–10000 · long chapters split &amp; rejoin</div></div>
+        </div>
+        <div class="note info">ℹ️ Character names and place names are never translated — passed through to the model exactly as written.</div>
+      </div></div>
+    </sc-if>
+
+    <!-- ===== STEP 4 · RUN ===== -->
+    <sc-if value="{{ isS4 }}">
+      <div class="body"><div class="console">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="gct" style="margin:0">Run console</div>
+          <div class="seg"><button class="{{ segIdle }}" onClick="{{ stIdle }}">Idle</button><button class="{{ segRun }}" onClick="{{ stRun }}">Running</button><button class="{{ segDone }}" onClick="{{ stDone }}">Success</button><button class="{{ segFail }}" onClick="{{ stFail }}">Failed</button></div>
+        </div>
+        <div class="progwrap"><div class="prog"><i style="{{ progStyle }}"></i></div><span class="pct">{{ pctLabel }}</span></div>
+        <div class="log">
+          <sc-for list="{{ logLines }}" as="ln" hint-placeholder-count="6">
+            <div class="{{ ln.cls }}">{{ ln.text }}</div>
+          </sc-for>
+        </div>
+      </div></div>
+    </sc-if>
+
+    <!-- ===== FOOTER (pinned) ===== -->
+    <div class="foot">
+      <sc-if value="{{ showBack }}"><div class="btn gho" onClick="{{ back }}">← Back</div></sc-if>
+      <sc-if value="{{ isS4 }}"><div class="btn gho" onClick="{{ clearLog }}">Clear log</div></sc-if>
+      <div class="drawer">
+        <sc-if value="{{ showDrawerPill }}"><span class="pill">▸ run drawer · idle</span></sc-if>
+        <sc-if value="{{ showDrawerPill }}"><span>expands &amp; takes over on Start</span></sc-if>
+      </div>
+      <sc-if value="{{ showNext }}"><div class="btn" onClick="{{ next }}">{{ nextLabel }}</div></sc-if>
+      <sc-if value="{{ canAbort }}"><div class="btn red" onClick="{{ abort }}">Abort</div></sc-if>
+      <sc-if value="{{ showResume }}"><div class="btn" style="border-color:#5a4a26;color:#d4a853">⏩ Resume</div></sc-if>
+      <div class="btn am {{ startDis }}" onClick="{{ start }}">{{ startLabel }}</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    step: 1,
+    mode: 'sr',              // sr | full | sum | key
+    keyLang: 'es',
+    keep: 40,
+    creativity: 5,
+    formats: { txt: true, epub: true, html: false },
+    mp3: false,
+    run: 'idle',             // idle | running | success | failed
+    chapters: [
+      'Miss Brooke','Old and Young','Waiting for Death','Three Love-Problems',
+      'The Dead Hand','The Widow and the Wife','Two Temptations','Sunset and Sunrise',
+      'The Bride','Frustrations','Confessions'
+    ].map((t,i)=>({ title:t, on:true })),
+  };
+
+  CR = ['','Verbatim','Faithful','Faithful+','Enriched','Enriched+','Vivid','Expressive','Inventive','Free','Unbound'];
+
+  go(n){ this.setState({ step:n }); }
+  set(p){ this.setState(p); }
+
+  toggleChapter(i){ this.setState(s=>{ const c=s.chapters.slice(); c[i]={...c[i],on:!c[i].on}; return {chapters:c}; }); }
+  toggleAll(){ this.setState(s=>{ const all=s.chapters.every(c=>c.on); return {chapters:s.chapters.map(c=>({...c,on:!all}))}; }); }
+  tgFormat(k){ this.setState(s=>{ const f={...s.formats,[k]:!s.formats[k]}; const mp3 = (k==='txt' && !f.txt) ? false : s.mp3; return {formats:f, mp3}; }); }
+
+  logFor(run){
+    const M=(cls,text)=>({cls:'li-'+cls,text});
+    if(run==='running') return [
+      M('mut','— run started · middlemarch.epub —'),
+      M('info','Chapter 1/20  ✓ saved'),
+      M('info','Chapter 2/20  ✓ saved'),
+      M('info','Chapter 3.1/4  rewriting…'),
+      M('mut','  keep 40% · Enriched+ · temp 0.44'),
+    ];
+    if(run==='success') return [
+      M('mut','— run complete —'),
+      M('ok','✓ saved chapter 19'),
+      M('ok','✓ saved chapter 20'),
+      M('ok','🎉 All done! Output: ~/Books/eliot/middlemarch.es.txt'),
+    ];
+    if(run==='failed') return [
+      M('info','Chapter 13/20  ✓ saved'),
+      M('err','✗ Chapter 14/20 failed — model call timed out (1200 s)'),
+      M('warn','💾 13 chapter(s) saved. Raise the timeout, then press Resume.'),
+    ];
+    return [
+      M('info','Ready. Configure settings above and press Start.'),
+      M('mut','The log streams per-chapter status here during a run.'),
+    ];
+  }
+
+  renderVals(){
+    const s=this.state, step=s.step;
+    const railCls=n=> step===n?'act':(step>n?'done':'');
+    const badge=n=> step>n?'✓':String(n);
+
+    // chapters
+    const onCount=s.chapters.filter(c=>c.on).length;
+    const allOn=onCount===s.chapters.length, allOff=onCount===0;
+    const chapters=s.chapters.map((c,i)=>({
+      num:String(i+1).padStart(2,'0')+'.', title:c.title,
+      glyph:c.on?'✓':'', cls:c.on?'on':'off', onToggle:()=>this.toggleChapter(i),
+    }));
+
+    // depth slider
+    const keepPct=((s.keep-10)/80)*100;
+    const keepSweet=s.keep>=30&&s.keep<=50;
+    const keepColor=keepSweet?'#7aab6e':'#9a978c';
+    const keepFill={position:'absolute',left:0,top:0,bottom:0,borderRadius:'99px',width:keepPct+'%',background:keepColor};
+    const keepKnob={left:keepPct+'%',background:keepSweet?'#7aab6e':'#d4a853'};
+
+    // creativity slider
+    const c=s.creativity;
+    const crPct=((c-1)/9)*100;
+    const crSweet=c>=5&&c<=6;
+    let crColor='#9a978c';
+    if(c<=2)crColor='#7a7870'; else if(c<=4)crColor='#cfc9ba'; else if(c<=6)crColor='#7aab6e'; else if(c<=8)crColor='#c98d3a'; else crColor='#c0604a';
+    const temp=((c-1)/9).toFixed(2);
+    const crFill={position:'absolute',left:0,top:0,bottom:0,borderRadius:'99px',width:crPct+'%',background:'linear-gradient(90deg,#5b594f,'+crColor+')'};
+    const crKnob={left:crPct+'%',background:crColor};
+
+    // run
+    const run=s.run;
+    const pct = run==='running'?62: run==='success'?100: run==='failed'?70: 0;
+    const startLabel = run==='success'||run==='failed' ? '▶ Start over' : (run==='running' ? '● Running…' : '▶ Start');
+
+    const formatCount = (s.formats.txt?1:0)+(s.formats.epub?1:0)+(s.formats.html?1:0);
+
+    return {
+      // rail
+      r1:railCls(1),r2:railCls(2),r3:railCls(3),r4:railCls(4),
+      b1:badge(1),b2:badge(2),b3:badge(3),b4:badge(4),
+      goS1:()=>this.go(1),goS2:()=>this.go(2),goS3:()=>this.go(3),goS4:()=>this.go(4),
+      showRecap: step>1, totalCh: s.chapters.length,
+      isS1:step===1,isS2:step===2,isS3:step===3,isS4:step===4,
+
+      // chapters
+      chapters, chapCount:onCount+' / '+s.chapters.length,
+      allGlyph: allOn?'✓':(allOff?'':'–'), allCls: allOn?'on':(allOff?'off':'part'),
+      toggleAll:()=>this.toggleAll(),
+
+      // modes
+      mSR:s.mode==='sr'?'sel':'',mFull:s.mode==='full'?'sel':'',mSum:s.mode==='sum'?'sel':'',mKey:s.mode==='key'?'sel':'',
+      setSR:()=>this.set({mode:'sr'}),setFull:()=>this.set({mode:'full'}),setSum:()=>this.set({mode:'sum'}),setKey:()=>this.set({mode:'key'}),
+      showDepth: s.mode!=='full',
+      showFullNote: s.mode==='full', showSumNote: s.mode==='sum', showKeyToggle: s.mode==='key',
+      klEs:s.keyLang==='es'?'sel':'', klEn:s.keyLang==='en'?'sel':'',
+      setKlEs:()=>this.set({keyLang:'es'}), setKlEn:()=>this.set({keyLang:'en'}),
+
+      // depth
+      keep:s.keep, onKeep:(e)=>this.set({keep:+e.target.value}),
+      keepFill, keepKnob, keepSweet,
+      keepReadout:'Keep '+s.keep+'% of original (↓ '+(100-s.keep)+'% reduction)',
+      keepReadStyle:{color:keepColor},
+
+      // creativity
+      creativity:c, onCr:(e)=>this.set({creativity:+e.target.value}),
+      crFill, crKnob, crSweet,
+      crReadout:this.CR[c]+' — level '+c+'/10  (temp ≈ '+temp+')',
+      crReadStyle:{color:crColor},
+
+      // output
+      fTxt:s.formats.txt?'on':'off', fEpub:s.formats.epub?'on':'off', fHtml:s.formats.html?'on':'off',
+      tgTxt:()=>this.tgFormat('txt'), tgEpub:()=>this.tgFormat('epub'), tgHtml:()=>this.tgFormat('html'),
+      mp3Cls: !s.formats.txt ? 'dis' : (s.mp3?'on':'off'),
+      tgMp3:()=> s.formats.txt && this.set({mp3:!s.mp3}),
+      mp3NeedTxt: !s.formats.txt,
+      showVoice: s.mp3 && s.formats.txt,
+      showEpubMeta: s.formats.epub,
+
+      // run console
+      run, segIdle:run==='idle'?'on':'',segRun:run==='running'?'on':'',segDone:run==='success'?'on':'',segFail:run==='failed'?'on':'',
+      stIdle:()=>this.set({run:'idle'}),stRun:()=>this.set({run:'running'}),stDone:()=>this.set({run:'success'}),stFail:()=>this.set({run:'failed'}),
+      progStyle:{width:pct+'%'}, pctLabel:pct+'%',
+      logLines:this.logFor(run),
+      clearLog:()=>this.set({run:'idle'}),
+
+      // footer
+      showBack: step>1,
+      back:()=>this.go(step-1),
+      showNext: step<4,
+      next:()=>this.go(step+1),
+      nextLabel: step===1?'Next: Transform →' : step===2?'Next: Output →' : 'Next: Run →',
+      showDrawerPill: step<4 && run==='idle',
+      canAbort: step===4 && run==='running',
+      abort:()=>this.set({run:'idle'}),
+      showResume: step===4 && run==='failed',
+      startDis: run==='running'?'dis':'',
+      startLabel,
+      start:()=>{ if(s.run==='running')return; this.setState({step:4, run:'running'}); },
+    };
+  }
+}
+</script>
+</body>
+</html>

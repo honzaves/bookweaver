@@ -89,7 +89,9 @@ All user-editable values live in `bookweaver.json`:
   chapter has no TOC title or heading, its title is the first N characters of
   its text
 - `tts` — MP3 audiobook defaults: `default_voice_es`, `default_voice_en`,
-  `mp3_bitrate_kbps`, `inter_chapter_silence_ms`, `post_title_silence_ms`
+  `mp3_bitrate_kbps`, `inter_chapter_silence_ms`, `post_title_silence_ms`,
+  `scene_break_silence_ms` (default 800 — the pause inserted where a chapter
+  body has a scene break)
 - `voices` — per-language (`es`/`en`) lists of `{label, value}` Kokoro voices
   for the voice dropdown; adding/removing a voice is a JSON edit, no code change
 
@@ -158,6 +160,15 @@ step in `run()`, producing `{stem}_ES_{level}.mp3` with ID3v2 CHAP/CTOC
 chapter markers. TTS does **not** count toward `total_steps` — it runs after
 the progress bar fills and reports via log lines only. An MP3 failure is
 logged but never fails the run (text outputs are already written).
+
+**Speech sanitization (audio only):** before synthesis, `tts.py` cleans the
+spoken text via two pure helpers — `clean_for_tts()` strips footnote refs
+(`[1]`, `(1)`, superscripts), emphasis markers (`*`, `` ` ``, boundary `_`),
+and leading list bullets; `segments_for_tts()` splits a chapter body at
+scene-break lines (`* * *`, `---`, etc.) so each break becomes an inserted
+`scene_break_silence_ms` pause. This operates on local strings only — the
+shared `results` list (used by the `.txt`/`.epub`/`.html` writers) is never
+mutated, so written output keeps its markup; only the audio is cleaned.
 
 ### After all chapters (book-wide key ideas)
 

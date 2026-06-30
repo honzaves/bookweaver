@@ -32,7 +32,8 @@
     "default_voice_en": "af_heart",
     "mp3_bitrate_kbps": 96,
     "inter_chapter_silence_ms": 1500,
-    "post_title_silence_ms": 1000
+    "post_title_silence_ms": 1000,
+    "scene_break_silence_ms": 800
   },
 
   "voices": {

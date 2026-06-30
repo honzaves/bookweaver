@@ -13,6 +13,7 @@ optional: the import gate below records availability so the rest of the
 app can run without them. See kokoro.md for installation instructions.
 """
 
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -46,6 +47,50 @@ def kokoro_lang_code(target_lang: str, voice: str) -> str:
     if voice.startswith(("bf_", "bm_")):
         return "b"
     return "a"
+
+
+# ──────────────────────────────────────────────────────────────
+#  TEXT SANITIZATION  (spoken-only — never touches written output)
+# ──────────────────────────────────────────────────────────────
+# A scene-break line: only spaced runs of *, -, or _ (e.g. "* * *", "***",
+# "---", "___", "- - -"). Matched per line so it can split a chapter body.
+_SCENE_BREAK_RE = re.compile(r"(?m)^[ \t]*(?:[*\-_][ \t]*){3,}$")
+
+# Footnote / reference markers that read badly aloud.
+_BRACKET_REF_RE = re.compile(r"\[\d+\]")
+_PAREN_REF_RE = re.compile(r"\(\d+\)")
+_SUPERSCRIPT_RE = re.compile(r"[¹²³⁰-⁹]+")
+
+# A leading list bullet on a line: "- ", "* ", "+ ", "• ".
+_LEADING_BULLET_RE = re.compile(r"(?m)^[ \t]*[-*+•][ \t]+")
+
+# An underscore used as emphasis: one not flanked by word chars on both sides,
+# so "_word_" loses its markers but "snake_case" is left intact.
+_EMPHASIS_UNDERSCORE_RE = re.compile(r"(?<!\w)_|_(?!\w)")
+
+
+def clean_for_tts(text: str) -> str:
+    """Strip markup that sounds wrong when spoken (footnote refs, emphasis
+    markers, list bullets) and normalize whitespace. Pure str→str; the
+    written .txt/.epub/.html output is produced separately and unaffected."""
+    text = _BRACKET_REF_RE.sub("", text)
+    text = _PAREN_REF_RE.sub("", text)
+    text = _SUPERSCRIPT_RE.sub("", text)
+    text = _LEADING_BULLET_RE.sub("", text)
+    text = text.replace("*", "").replace("`", "")
+    text = _EMPHASIS_UNDERSCORE_RE.sub("", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"(?m)^[ \t]+|[ \t]+$", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def segments_for_tts(body: str) -> list[str]:
+    """Split *body* at scene-break lines, clean each part, and drop empties.
+    No scene break → one part (same segmentation as before, now cleaned).
+    Splitting happens BEFORE cleaning so scene-break asterisks survive."""
+    parts = (clean_for_tts(p) for p in _SCENE_BREAK_RE.split(body))
+    return [p for p in parts if p]
 
 
 # ──────────────────────────────────────────────────────────────
@@ -155,6 +200,7 @@ def synthesise_book(
     bitrate_kbps: int = 96,
     inter_chapter_silence_ms: int = 1500,
     post_title_silence_ms: int = 1000,
+    scene_break_silence_ms: int = 800,
     book_title: str = "",
     author: str = "",
     on_chapter: Callable[[int, int], None] | None = None,
@@ -181,11 +227,17 @@ def synthesise_book(
             cursor += len(gap)
 
         start = cursor
-        for seg in (
-            _synth(pipe, title, voice, lang_code),
+        # Title, a beat, then the body split at scene breaks — each break
+        # becomes an inserted silence. All text is cleaned for speech only.
+        chapter_audio = [
+            _synth(pipe, clean_for_tts(title), voice, lang_code),
             _silence(post_title_silence_ms),
-            _synth(pipe, body, voice, lang_code),
-        ):
+        ]
+        for j, part in enumerate(segments_for_tts(body)):
+            if j > 0:
+                chapter_audio.append(_silence(scene_break_silence_ms))
+            chapter_audio.append(_synth(pipe, part, voice, lang_code))
+        for seg in chapter_audio:
             segments.append(seg)
             cursor += len(seg)
 

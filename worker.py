@@ -485,6 +485,9 @@ class ProcessingWorker(QThread):
                 post_title_silence_ms=int(
                     tts_cfg.get("post_title_silence_ms", 1000)
                 ),
+                scene_break_silence_ms=int(
+                    tts_cfg.get("scene_break_silence_ms", 800)
+                ),
                 book_title=meta["title"],
                 author=meta["creator"],
                 on_chapter=lambda i, n: self.log.emit(
