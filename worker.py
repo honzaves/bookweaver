@@ -738,6 +738,25 @@ class ProcessingWorker(QThread):
         return chunks or [text]
 
     @staticmethod
+    def _split_into_chunks_with_scenes(
+        text: str, max_words: int = 2000
+    ) -> list[tuple[str, bool]]:
+        """Split *text* into (chunk, starts_new_scene) pairs. Scene breaks
+        (epub_io.SCENE_BREAK paragraphs) hard-segment the text; within each
+        segment the existing word-budget splitter applies. starts_new_scene
+        is True only for the first chunk of a segment after the first.
+        SCENE_BREAK never appears in returned chunk text."""
+        from epub_io import SCENE_BREAK
+        segments = [s for s in text.split(SCENE_BREAK) if s.strip()] or [text]
+        out: list[tuple[str, bool]] = []
+        for seg_idx, segment in enumerate(segments):
+            for chunk_idx, chunk in enumerate(
+                ProcessingWorker._split_into_chunks(segment, max_words)
+            ):
+                out.append((chunk, chunk_idx == 0 and seg_idx > 0))
+        return out
+
+    @staticmethod
     def _extract_key_ideas(body: str, header: str) -> str:
         """Return the key-ideas section of *body* (from the first occurrence
         of *header* to the end), or the whole *body* if *header* is absent.

@@ -560,3 +560,32 @@ class TestExtractProperNouns:
 
     def test_empty_text(self):
         assert self.call("") == []
+
+
+class TestSplitWithScenes:
+    def _para(self, n):
+        return " ".join(["word"] * n)
+
+    def call(self, text, max_words=2000):
+        return ProcessingWorker._split_into_chunks_with_scenes(text, max_words)
+
+    def test_no_sentinel_behaves_like_plain_split(self):
+        text = "\n\n".join([self._para(800)] * 3)
+        pairs = self.call(text, max_words=2000)
+        # same chunk count as the plain splitter, none marked new-scene
+        assert len(pairs) == 2
+        assert all(flag is False for _, flag in pairs)
+
+    def test_scene_break_marks_next_chunk(self):
+        from epub_io import SCENE_BREAK
+        text = f"{self._para(50)}\n\n{SCENE_BREAK}\n\n{self._para(50)}"
+        pairs = self.call(text, max_words=2000)
+        assert len(pairs) == 2
+        assert pairs[0][1] is False
+        assert pairs[1][1] is True
+
+    def test_sentinel_never_in_chunk_text(self):
+        from epub_io import SCENE_BREAK
+        text = f"{self._para(50)}\n\n{SCENE_BREAK}\n\n{self._para(50)}"
+        for chunk, _ in self.call(text):
+            assert SCENE_BREAK not in chunk
