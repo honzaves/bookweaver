@@ -23,6 +23,7 @@ from prompts import (
     build_translation_prompt,
     build_key_ideas_prompt,
     build_book_key_ideas_prompt,
+    build_context_block,
     KEY_IDEAS_HEADER,
     BOOK_KEY_IDEAS_HEADER,
 )
@@ -339,7 +340,9 @@ class ProcessingWorker(QThread):
 
                     spanish_parts.append(self._strip_asterisk_markers(spanish))
 
-            chapter_body = "\n\n".join(spanish_parts)
+            chapter_body = self._rejoin_with_scene_breaks(
+                spanish_parts, scene_flags
+            )
 
             # For the key-ideas mode, append a key-ideas section to the body.
             if mode == "summarise_key_ideas":
@@ -768,7 +771,10 @@ class ProcessingWorker(QThread):
         is True only for the first chunk of a segment after the first.
         SCENE_BREAK never appears in returned chunk text."""
         from epub_io import SCENE_BREAK
-        segments = [s for s in text.split(SCENE_BREAK) if s.strip()] or [text]
+        segments = (
+            [s for s in text.split(SCENE_BREAK) if s.strip()]
+            or [text.replace(SCENE_BREAK, " ")]
+        )
         out: list[tuple[str, bool]] = []
         for seg_idx, segment in enumerate(segments):
             for chunk_idx, chunk in enumerate(
@@ -776,6 +782,22 @@ class ProcessingWorker(QThread):
             ):
                 out.append((chunk, chunk_idx == 0 and seg_idx > 0))
         return out
+
+    @staticmethod
+    def _rejoin_with_scene_breaks(
+        parts: list[str], scene_flags: list[bool]
+    ) -> str:
+        """Join per-chunk outputs into one chapter body, restoring a
+        '* * *' separator before each chunk that starts a new scene (the
+        scene-aware splitter stripped the original separator lines).
+        With no flags set (carry off / no scene marking) the result is
+        byte-identical to '\\n\\n'.join(parts)."""
+        out: list[str] = []
+        for flag, part in zip(scene_flags, parts):
+            if flag and out:
+                out.append("* * *")
+            out.append(part)
+        return "\n\n".join(out)
 
     @staticmethod
     def _extract_key_ideas(body: str, header: str) -> str:
@@ -843,7 +865,6 @@ class ProcessingWorker(QThread):
         ("off"/"glossary"/"prose"/"both"). Names come from the source chunk;
         prose tail comes from the previous chunk's output and is suppressed at
         a scene boundary or when there is no prior output."""
-        from prompts import build_context_block
         names = (
             ProcessingWorker.extract_proper_nouns(source_chunk)
             if carry_mode in ("glossary", "both") else []

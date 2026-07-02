@@ -590,6 +590,37 @@ class TestSplitWithScenes:
         for chunk, _ in self.call(text):
             assert SCENE_BREAK not in chunk
 
+    def test_sentinel_only_input_leaks_no_sentinel(self):
+        # A chapter whose marked text is nothing but sentinels/whitespace
+        # must still never emit SCENE_BREAK (fallback path).
+        from epub_io import SCENE_BREAK
+        text = f"{SCENE_BREAK}\n\n{SCENE_BREAK}"
+        for chunk, _ in self.call(text):
+            assert SCENE_BREAK not in chunk
+
+
+class TestRejoinWithSceneBreaks:
+    def call(self, parts, flags):
+        return ProcessingWorker._rejoin_with_scene_breaks(parts, flags)
+
+    def test_no_flags_is_plain_join(self):
+        parts = ["one", "two", "three"]
+        assert self.call(parts, [False, False, False]) == "\n\n".join(parts)
+
+    def test_flagged_part_gets_separator_before_it(self):
+        result = self.call(["one", "two"], [False, True])
+        assert result == "one\n\n* * *\n\ntwo"
+
+    def test_leading_flag_adds_no_separator(self):
+        # A scene flag on the very first chunk must not prepend a separator.
+        assert self.call(["only"], [True]) == "only"
+
+    def test_result_never_contains_sentinel(self):
+        from epub_io import SCENE_BREAK
+        result = self.call(["a", "b", "c"], [False, True, True])
+        assert SCENE_BREAK not in result
+        assert result == "a\n\n* * *\n\nb\n\n* * *\n\nc"
+
 
 class TestCarryContext:
     def call(self, mode, src, prior, new_scene):
