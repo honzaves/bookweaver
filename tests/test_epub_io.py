@@ -36,6 +36,16 @@ def _build_epub(tmp_path, docs, toc=None):
     return str(out)
 
 
+def _make_epub_with_hr(tmp_path, hr_first=False):
+    """EPUB with one chapter containing an <hr/> scene break. hr_first puts
+    the <hr> before any text, so a mutate-soup-first extraction would leak
+    the sentinel into the preview-fallback title."""
+    body = "<p>" + "word " * 60 + "</p><hr/><p>" + "word " * 60 + "</p>"
+    if hr_first:
+        body = "<hr/>" + body
+    return _build_epub(tmp_path, [("c1.xhtml", body)])
+
+
 BODY = "<p>" + ("word " * 80) + "</p>"  # > 200 chars of text
 
 
@@ -97,6 +107,42 @@ class TestExtractChapters:
             tmp_path, [("chap_01.xhtml", f"<h1>Heading</h1>{BODY}")], toc=toc
         )
         assert extract_chapters(path)[0].title == "Chapter From TOC"
+
+
+class TestSceneBreaks:
+    def test_sentinel_constant_exists(self):
+        assert epub_io.SCENE_BREAK == "␞"
+
+    def test_mark_scene_breaks_default_off(self, tmp_path):
+        # Build a tiny EPUB with an <hr> and assert no sentinel by default.
+        path = _make_epub_with_hr(tmp_path)
+        chapters = epub_io.extract_chapters(str(path))
+        assert epub_io.SCENE_BREAK not in chapters[0].text
+
+    def test_mark_scene_breaks_inserts_sentinel(self, tmp_path):
+        path = _make_epub_with_hr(tmp_path)
+        chapters = epub_io.extract_chapters(str(path), mark_scene_breaks=True)
+        assert epub_io.SCENE_BREAK in chapters[0].text
+
+    def test_marking_keeps_indices_and_titles_stable(self, tmp_path):
+        # hr before any text: the naive approach (mutate soup first) would
+        # leak the sentinel into the preview-fallback title, and the length
+        # change could flip the MIN_CHAPTER_CHARS filter — misaligning the
+        # worker's (marked) indices against the app's (unmarked) list.
+        path = _make_epub_with_hr(tmp_path, hr_first=True)
+        plain = epub_io.extract_chapters(str(path))
+        marked = epub_io.extract_chapters(str(path), mark_scene_breaks=True)
+        assert [(c.index, c.title) for c in marked] == \
+            [(c.index, c.title) for c in plain]
+        assert all(epub_io.SCENE_BREAK not in c.title for c in marked)
+
+    def test_separator_only_lines_become_sentinels(self):
+        marked = epub_io._mark_separator_lines("before\n* * *\n———\nafter")
+        assert marked == f"before\n{epub_io.SCENE_BREAK}\n{epub_io.SCENE_BREAK}\nafter"
+
+    def test_prose_lines_are_untouched(self):
+        text = "a *starred* word\n- a list item"
+        assert epub_io._mark_separator_lines(text) == text
 
 
 class TestSelectChapters:

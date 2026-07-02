@@ -11,6 +11,7 @@ Imports ebooklib / bs4 only. Never Qt, app, worker, or settings.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -22,6 +23,17 @@ from ebooklib import epub
 # shorter documents (cover, nav) are skipped. The checkbox list lets the
 # user deselect anything that slips past this heuristic.
 MIN_CHAPTER_CHARS = 200
+
+# Out-of-prose marker for a scene break. The Unicode "symbol for record
+# separator" never occurs in book text, so it round-trips safely and is
+# stripped before any prompt or output write (see worker._split_into_chunks_with_scenes).
+SCENE_BREAK = "␞"
+
+# A line consisting only of a scene-break separator: '* * *' (2+ stars),
+# a run of 3+ dashes/asterisks, or an asterism '⁂'.
+_SEPARATOR_LINE = re.compile(
+    r"^\s*(?:\*\s*){2,}\*?\s*$|^\s*[*–—\-]{3,}\s*$|^\s*⁂+\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -79,8 +91,24 @@ def _resolve_title(doc_name: str, soup: BeautifulSoup,
     return preview or base
 
 
-def extract_chapters(path: str, preview_chars: int = 50) -> list[Chapter]:
-    """Read *path* and return its chapters in document order."""
+def _mark_separator_lines(text: str) -> str:
+    """Replace separator-only lines ('* * *', '⁂', '———') with SCENE_BREAK."""
+    out = []
+    for line in text.split("\n"):
+        out.append(SCENE_BREAK if _SEPARATOR_LINE.match(line) else line)
+    return "\n".join(out)
+
+
+def extract_chapters(path: str, preview_chars: int = 50,
+                     mark_scene_breaks: bool = False) -> list[Chapter]:
+    """Read *path* and return its chapters in document order.
+
+    When *mark_scene_breaks* is True, scene breaks (<hr> elements and
+    separator-only lines like '* * *') are represented in Chapter.text as a
+    lone SCENE_BREAK paragraph, for the worker's scene-gated prose carry.
+    Default False keeps text byte-identical to a plain extraction. The
+    length filter and title are always computed on the UNMARKED text, so
+    chapter count, indices, and titles match a plain extraction exactly."""
     book = epub.read_epub(path)
     toc_map = _flatten_toc(book.toc)
     chapters: list[Chapter] = []
@@ -89,9 +117,20 @@ def extract_chapters(path: str, preview_chars: int = 50) -> list[Chapter]:
         if item.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
         soup = BeautifulSoup(item.get_content(), "html.parser")
+        # Filter and title use the unmarked text/soup: the app extracts
+        # without marking, and inclusion/index/title parity between the two
+        # reads is what keeps selected_chapters aligned (module docstring).
+        # Mutating the soup first would also let the sentinel leak into a
+        # preview-fallback title.
         text = soup.get_text(separator="\n").strip()
         if len(text) > MIN_CHAPTER_CHARS:
             title = _resolve_title(item.get_name(), soup, toc_map, preview_chars)
+            if mark_scene_breaks:
+                for hr in soup.find_all("hr"):
+                    hr.replace_with(f"\n{SCENE_BREAK}\n")
+                text = _mark_separator_lines(
+                    soup.get_text(separator="\n").strip()
+                )
             chapters.append(Chapter(idx, item.get_name(), title, text))
             idx += 1
     return chapters
