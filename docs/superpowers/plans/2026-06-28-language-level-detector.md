@@ -22,7 +22,7 @@
 - Install deps with `uv pip install` (not `uv sync`). The spaCy model installs via a **pinned wheel URL**, not `python -m spacy download` (which does not respect the uv venv).
 - Known pre-existing test failure to ignore (do **not** "fix"): `tests/test_settings.py::TestOllamaTimeout::test_defaults_when_missing`.
 - After any `worker.py` edit touching a class boundary, run `grep -n "^class " *.py` and confirm the expected classes are still present (see CLAUDE.md "Known historical issues").
-- **Coordination with the sliding-window plan:** these two plans are independently *designed* but not independently *mergeable* — both append a key to the same `_build_config()` dict literal, both add a row to `_add_options_group()`, both edit `worker.py` `run()`, `tests/test_worker.py`, and `CLAUDE.md`. The `"validate"` path (Tasks 8–10) widens this overlap further: it also edits `prompts.py` (`build_rewrite_prompt`/`build_translation_prompt` signatures), `tests/test_prompts.py`, and the **inside** of `worker.py`'s chunk loop (the three Spanish-producing sites). Implement the two plans **sequentially**; the second one rebases on the first and expects those shared spots to already have the other feature's line.
+- **Coordination with the sliding-window plan:** these two plans are independently *designed* but not independently *mergeable* — both append a key to the same `_build_config()` dict literal, both add a row to `_add_options_group()`, both edit `worker.py` `run()`, `tests/test_worker.py`, and `CLAUDE.md`. The `"validate"` path (Tasks 8–10) widens this overlap further: it also edits `prompts.py` (`build_rewrite_prompt`/`build_translation_prompt` signatures), `tests/test_prompts.py`, and the **inside** of `worker.py`'s chunk loop (the three Spanish-producing sites). Implement the two plans **sequentially**; the second one rebases on the first and expects those shared spots to already have the other feature's line. Two spots need explicit reconciliation when this plan runs **second**: (a) both plans add a trailing default parameter to `build_rewrite_prompt`/`build_translation_prompt` and each calls its own "the last parameter" — the order of `simplify_note`/`context_block` does not matter, but always pass both by keyword; (b) if the sliding-window plan landed first, the three Spanish-producing call sites already pass `context_block=context_block` — carry that argument into the `build_fn` closures Task 10 introduces (in the closure's builder call **and** the non-validate direct call), otherwise validate-mode runs would silently lose the continuity carry.
 
 ---
 
@@ -272,13 +272,17 @@ _NLP = None
 
 
 def _load_nlp():
-    """Load and cache the Spanish spaCy pipeline. Disables the parser's
-    unneeded components for speed but keeps the tagger/morphologizer."""
+    """Load and cache the Spanish spaCy pipeline. Excludes the parser, NER,
+    and lemmatizer — the dependency parser is memory-heavy on whole-book
+    texts (on the order of 1 GB per 100k chars) and only sentence boundaries
+    are needed, which the cheap rule-based sentencizer provides. The
+    morphologizer stays: it supplies the Mood=Sub feature the profiler
+    counts."""
     global _NLP
     if _NLP is None:
         import spacy
-        _NLP = spacy.load(SPACY_MODEL, exclude=["ner", "lemmatizer"])
-        if "sentencizer" not in _NLP.pipe_names and "parser" not in _NLP.pipe_names:
+        _NLP = spacy.load(SPACY_MODEL, exclude=["parser", "ner", "lemmatizer"])
+        if "sentencizer" not in _NLP.pipe_names:
             _NLP.add_pipe("sentencizer")
     return _NLP
 
@@ -289,7 +293,8 @@ def profile_text(text: str) -> dict:
 
     nlp = _load_nlp()
     # Large books can exceed spaCy's default 1,000,000-char ceiling; raise it
-    # for this call so big concatenated outputs still profile.
+    # for this call so big concatenated outputs still profile (safe now that
+    # the memory-heavy parser is excluded in _load_nlp).
     nlp.max_length = max(nlp.max_length, len(text) + 1)
     doc = nlp(text)
 
@@ -381,11 +386,10 @@ Expected: FAIL with `AttributeError: ... no attribute 'build_judge_prompt'`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Append to `level_detector.py`:
+Add `import re` to the module's **top** import block (a mid-file module-level
+import would trip pycodestyle E402), then append to `level_detector.py`:
 
 ```python
-import re
-
 # ──────────────────────────────────────────────────────────────
 #  OLLAMA HELPER + LLM JUDGE
 # ──────────────────────────────────────────────────────────────
@@ -552,7 +556,8 @@ def format_report(assessment: dict, target_level: str) -> str:
     whole = assessment["whole"]
     if whole is None:
         lines.append("Feature profiler unavailable (spaCy/wordfreq not "
-                     "installed) — see plan Task 6.")
+                     "installed) — install spacy, wordfreq and the "
+                     "es_core_news_sm wheel to enable it.")
     else:
         lines.append(
             f"Whole document:  band={whole['band']}  "
@@ -1041,14 +1046,21 @@ Spanish-producing sites so the loop lives in one place.
   `_ollama_call`.
 
 **Behaviour of the helper:**
-1. `attempt 0`: `_ollama_call(model, build_fn(""), label, temperature)`. If
-   `None`, return `None` (caller fails the chapter as today).
-2. If the profiler is unavailable, or `profile_text(text)["n_words"] < min_words`,
-   accept attempt 0 as-is (log one muted line for the word-floor skip). No gate.
-3. Else compute `band = profile_text(text)["band"]`; `dist = band_distance(band,
-   target_level)`. If `dist < 2`, accept. Otherwise log a warning and re-call with
-   `build_fn(build_simplify_note(band, target_level))`. Repeat up to `max_retries`.
-   Between attempts, if `self._abort`, return the best text so far.
+1. `attempt 0`: `_ollama_call(model, build_fn(""), label=label,
+   temperature=temperature)` — `label` and `temperature` are keyword-only on
+   `_ollama_call`; pass the prompt positionally (the tests read
+   `call_args_list[n].args[1]`). If `None`, return `None` (caller fails the
+   chapter as today).
+2. If the profiler is unavailable, accept attempt 0 as-is. Otherwise profile
+   the attempt **exactly once** — `m = level_detector.profile_text(text)` —
+   and reuse `m` for both checks below (the tests' `side_effect` lists assume
+   one `profile_text` call per attempt). If `m["n_words"] < min_words`, accept
+   as-is (log one muted line for the word-floor skip). No gate.
+3. Else `dist = level_detector.band_distance(m["band"], target_level)`. If
+   `dist < 2`, accept. Otherwise log a warning and re-call with
+   `build_fn(build_simplify_note(m["band"], target_level))`. Repeat up to
+   `max_retries`. Between attempts, if `self._abort`, return the best text so
+   far.
 4. After exhausting retries, keep the **last** generated text, log that the chunk
    could not be brought within range, and return it (never fails the run).
 
@@ -1147,7 +1159,11 @@ Expected: FAIL with `AttributeError: 'ProcessingWorker' object has no attribute 
 
 Add `_generate_validated_chunk` to `ProcessingWorker` (place it next to
 `_run_level_check`). Lazy-import `level_detector` and `prompts.build_simplify_note`
-inside the method. Follow the behaviour spec above. The first `_ollama_call`
+inside the method. Access the gate and helpers as module attributes
+(`level_detector.PROFILER_AVAILABLE`, `level_detector.profile_text`,
+`level_detector.band_distance`) — not via `from level_detector import ...` —
+so the tests' `patch("level_detector....")` calls take effect. Follow the
+behaviour spec above. The first `_ollama_call`
 returning `None` returns `None` immediately. Profiler-absent / short-chunk paths
 return attempt 0 untouched. Use `level_detector.band_distance(band, target) >= 2`
 as the regenerate condition. Log a `"muted"`/`"warning"` line per regeneration so

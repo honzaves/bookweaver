@@ -13,9 +13,21 @@ optional: the import gate below records availability so the rest of the
 app can run without them. See kokoro.md for installation instructions.
 """
 
+import os
 import re
 from pathlib import Path
 from typing import Callable
+
+# ── Model cache location ──────────────────────────────────────
+# Kokoro's weights are fetched from Hugging Face on first use. Point the HF
+# cache at a project-local, git-ignored folder so the model lives with the
+# project (not the hidden global ~/.cache) and is reused offline on every
+# later run. huggingface_hub already skips the download when the files are
+# present, so "download only if missing" is automatic. Must be set before
+# kokoro imports huggingface_hub below. A user-set HF_HOME always wins.
+os.environ.setdefault(
+    "HF_HOME", str(Path(__file__).resolve().parent / ".hf_cache")
+)
 
 try:
     import kokoro       # noqa: F401  — pulls in torch (~2.5 GB install)

@@ -20,7 +20,7 @@
 - Carry attaches to the **body-producing call per mode**: `translate`→translation call; `summarise_rewrite` & `summarise_key_ideas`(es)→rewrite call; `summarise_only` & `summarise_key_ideas`(en)→summary call.
 - Known pre-existing test failure to ignore: `tests/test_settings.py::TestOllamaTimeout::test_defaults_when_missing`.
 - After any `worker.py`/`epub_io.py` edit touching a class boundary, run `grep -n "^class " *.py` and confirm expected classes remain (CLAUDE.md "Known historical issues" — `str_replace` has silently dropped `class` lines before).
-- **Coordination with the language-level-detector plan:** these two plans are independently *designed* but not independently *mergeable* — both append a key to the same `_build_config()` dict literal, both add a row to `_add_options_group()`, both edit `worker.py` `run()`, `tests/test_worker.py`, and `CLAUDE.md`. Implement them **sequentially**; the second one rebases on the first and expects those shared spots to already have the other feature's line.
+- **Coordination with the language-level-detector plan:** these two plans are independently *designed* but not independently *mergeable* — both append a key to the same `_build_config()` dict literal, both add a row to `_add_options_group()`, both edit `worker.py` `run()`, `tests/test_worker.py`, and `CLAUDE.md`. Implement them **sequentially**; the second one rebases on the first and expects those shared spots to already have the other feature's line. Two spots need explicit reconciliation when this plan runs **second**: (a) both plans add a trailing default parameter to `build_rewrite_prompt`/`build_translation_prompt` and each calls its own "the last parameter" — the order of `context_block`/`simplify_note` does not matter, but always pass both by keyword; (b) the detector plan's Task 10 rewrites the three Spanish-producing call sites into `build_fn = lambda note: ...` closures routed through `_generate_validated_chunk`, so Task 5 step 5(e) below must thread `context_block=context_block` into the closure's builder call **and** the non-validate direct call — not into a bare `_ollama_call(... build_*_prompt(...))` line, which will no longer exist in that shape.
 
 ---
 
@@ -264,7 +264,7 @@ Detect scene breaks (`<hr>` and separator-only paragraphs) and represent them as
 
 **Interfaces:**
 - Produces: module constant `SCENE_BREAK = "␞"` (SYMBOL FOR RECORD SEPARATOR — will never occur in book prose).
-- Modifies: `extract_chapters(path, preview_chars=50, mark_scene_breaks=False)` — when `mark_scene_breaks` is True, `<hr>` elements and separator-only lines in `Chapter.text` become a lone `SCENE_BREAK` paragraph; default False leaves text byte-identical to today.
+- Modifies: `extract_chapters(path, preview_chars=50, mark_scene_breaks=False)` — when `mark_scene_breaks` is True, `<hr>` elements and separator-only lines in `Chapter.text` become a lone `SCENE_BREAK` paragraph; default False leaves text byte-identical to today. The `MIN_CHAPTER_CHARS` length filter and title resolution always run on the **unmarked** text, so chapter count, indices, and titles are identical with and without marking — the app extracts unmarked, and any divergence would misalign `selected_chapters` and could leak the sentinel into a preview-fallback title.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -287,22 +287,36 @@ class TestSceneBreaks:
         path = _make_epub_with_hr(tmp_path)
         chapters = epub_io.extract_chapters(str(path), mark_scene_breaks=True)
         assert epub_io.SCENE_BREAK in chapters[0].text
+
+    def test_marking_keeps_indices_and_titles_stable(self, tmp_path):
+        # hr before any text: the naive approach (mutate soup first) would
+        # leak the sentinel into the preview-fallback title, and the length
+        # change could flip the MIN_CHAPTER_CHARS filter — misaligning the
+        # worker's (marked) indices against the app's (unmarked) list.
+        path = _make_epub_with_hr(tmp_path, hr_first=True)
+        plain = epub_io.extract_chapters(str(path))
+        marked = epub_io.extract_chapters(str(path), mark_scene_breaks=True)
+        assert [(c.index, c.title) for c in marked] == \
+            [(c.index, c.title) for c in plain]
+        assert all(epub_io.SCENE_BREAK not in c.title for c in marked)
 ```
 
 Add this helper at module top of `tests/test_epub_io.py` (reuse the existing EPUB-building style already in that file if one is present; otherwise):
 
 ```python
-def _make_epub_with_hr(tmp_path):
+def _make_epub_with_hr(tmp_path, hr_first=False):
     from ebooklib import epub
     book = epub.EpubBook()
     book.set_identifier("id1")
     book.set_title("T")
     book.set_language("en")
     c = epub.EpubHtml(title="Ch1", file_name="c1.xhtml", lang="en")
-    c.set_content(
-        "<html><body><p>" + "word " * 60 + "</p><hr/><p>" +
-        "word " * 60 + "</p></body></html>"
+    body = (
+        "<p>" + "word " * 60 + "</p><hr/><p>" + "word " * 60 + "</p>"
     )
+    if hr_first:
+        body = "<hr/>" + body
+    c.set_content("<html><body>" + body + "</body></html>")
     book.add_item(c)
     book.spine = ["nav", c]
     book.add_item(epub.EpubNcx())
@@ -333,7 +347,9 @@ Add a separator-line regex and a marking step. Add near the top imports:
 ```python
 import re
 
-_SEPARATOR_LINE = re.compile(r"^\s*(?:\*\s*){2,}\*?\s*$|^\s*[⁂*–—\-]{3,}\s*$")
+_SEPARATOR_LINE = re.compile(
+    r"^\s*(?:\*\s*){2,}\*?\s*$|^\s*[*–—\-]{3,}\s*$|^\s*⁂+\s*$"
+)
 ```
 
 In `extract_chapters`, change the signature and the per-document body:
@@ -346,7 +362,9 @@ def extract_chapters(path: str, preview_chars: int = 50,
     When *mark_scene_breaks* is True, scene breaks (<hr> elements and
     separator-only lines like '* * *') are represented in Chapter.text as a
     lone SCENE_BREAK paragraph, for the worker's scene-gated prose carry.
-    Default False keeps text byte-identical to a plain extraction."""
+    Default False keeps text byte-identical to a plain extraction. The
+    length filter and title are always computed on the UNMARKED text, so
+    chapter count, indices, and titles match a plain extraction exactly."""
     book = epub.read_epub(path)
     toc_map = _flatten_toc(book.toc)
     chapters: list[Chapter] = []
@@ -355,14 +373,20 @@ def extract_chapters(path: str, preview_chars: int = 50,
         if item.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
         soup = BeautifulSoup(item.get_content(), "html.parser")
-        if mark_scene_breaks:
-            for hr in soup.find_all("hr"):
-                hr.replace_with(f"\n{SCENE_BREAK}\n")
+        # Filter and title use the unmarked text/soup: the app extracts
+        # without marking, and inclusion/index/title parity between the two
+        # reads is what keeps selected_chapters aligned (module docstring).
+        # Mutating the soup first would also let the sentinel leak into a
+        # preview-fallback title.
         text = soup.get_text(separator="\n").strip()
-        if mark_scene_breaks:
-            text = _mark_separator_lines(text)
         if len(text) > MIN_CHAPTER_CHARS:
             title = _resolve_title(item.get_name(), soup, toc_map, preview_chars)
+            if mark_scene_breaks:
+                for hr in soup.find_all("hr"):
+                    hr.replace_with(f"\n{SCENE_BREAK}\n")
+                text = _mark_separator_lines(
+                    soup.get_text(separator="\n").strip()
+                )
             chapters.append(Chapter(idx, item.get_name(), title, text))
             idx += 1
     return chapters
@@ -622,6 +646,8 @@ to:
 
 Apply each by editing the corresponding `_ollama_call(... build_*_prompt(...) ...)` line to add the `context_block=context_block` keyword argument.
 
+**If the language-level-detector plan has already landed**, the three Spanish-producing sites are no longer bare `_ollama_call(... build_*_prompt(...))` lines — each is a `build_fn = lambda note: build_*_prompt(..., simplify_note=note)` closure plus a validate/direct branch. Add `context_block=context_block` inside the closure's builder call **and** in the `else`-branch direct call, so validate-mode runs keep the carry too.
+
 - [ ] **Step 6: Add config passthrough in app + resume (so the run actually receives carry_mode)**
 
 This step is completed fully in Task 6 (UI). For now, confirm `run()` defaults `carry_mode` to `"off"` so the pipeline is correct before the UI exists, and run the worker tests:
@@ -737,7 +763,8 @@ git commit -m "docs: document cross-chunk continuity carry"
 
 ## Self-Review
 
-- **Spec coverage:** glossary = source name-protection list (Task 1, assembled Task 5); scene-gated prose (Tasks 3–5); UI per-run selector off/glossary/prose/both (Task 6); applies to all modes via per-mode body-call attach (Task 5 step 5); sentinel never leaks (Task 4 test + Task 6 step 4 grep). Covered.
+- **Spec coverage:** glossary = source name-protection list (Task 1, assembled Task 5); scene-gated prose (Tasks 3–5); UI per-run selector off/glossary/prose/both (Task 6); applies to all modes via per-mode body-call attach (Task 5 step 5); sentinel never leaks (Task 3 title test, Task 4 chunk test + Task 6 step 4 grep). Covered.
 - **Placeholder scan:** concrete regexes, concrete `tail_words=120`, concrete sentinel `␞`, concrete per-mode attach points enumerated. No TODOs.
 - **Type consistency:** `_split_into_chunks_with_scenes` returns `list[tuple[str, bool]]` consumed in Task 5 as `(chunks, scene_flags)`; `_carry_context(carry_mode, source_chunk, prior_output, starts_new_scene)` signature matches its test and its `run()` call site; `build_context_block(names, prior_prose)` signature matches `_carry_context`'s call and Task 2's tests; `context_block=` keyword matches all three builder signatures.
 - **Resume:** glossary is stateless (re-derived from source); prose is within-chapter and resume restarts at a chapter boundary — no carry state added to `_resume_state`. Consistent with the Global Constraints.
+- **Index stability:** the marked and unmarked extractions apply the `MIN_CHAPTER_CHARS` filter and title resolution to identical unmarked text, so `mark_scene_breaks` cannot change chapter count, indices, or titles — `selected_chapters` stays aligned between the app's (unmarked) and the worker's (marked) reads (Task 3 test asserts parity).

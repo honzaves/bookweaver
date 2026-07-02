@@ -210,3 +210,6 @@ __marimo__/
 *.epub
 books/
 .DS_Store
+
+# Hugging Face model cache (Kokoro TTS weights, downloaded on first run)
+.hf_cache/

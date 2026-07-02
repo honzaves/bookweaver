@@ -469,7 +469,8 @@ class ProcessingWorker(QThread):
 
         self.log.emit(
             f"\n🔊  Synthesising audiobook with voice '{voice}' "
-            f"(first run downloads the Kokoro model from Hugging Face)…",
+            f"(first run only: downloads the Kokoro model into .hf_cache/, "
+            f"cached locally for later runs)…",
             "info",
         )
         try:
