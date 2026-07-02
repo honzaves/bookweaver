@@ -589,3 +589,31 @@ class TestSplitWithScenes:
         text = f"{self._para(50)}\n\n{SCENE_BREAK}\n\n{self._para(50)}"
         for chunk, _ in self.call(text):
             assert SCENE_BREAK not in chunk
+
+
+class TestCarryContext:
+    def call(self, mode, src, prior, new_scene):
+        return ProcessingWorker._carry_context(mode, src, prior, new_scene)
+
+    def test_off_returns_empty(self):
+        assert self.call("off", "Alice went home.", "prev output", False) == ""
+
+    def test_glossary_includes_names_not_prose(self):
+        block = self.call("glossary", "Alice met Bob today and Alice left.",
+                          "prev output text", False)
+        assert "Alice" in block
+        assert "prev output text" not in block
+
+    def test_prose_includes_tail_not_names(self):
+        block = self.call("prose", "Alice met Bob and Alice waved.",
+                          "the prior passage ended here", False)
+        assert "the prior passage ended here" in block
+        assert "Alice" not in block
+
+    def test_prose_suppressed_on_new_scene(self):
+        block = self.call("prose", "text", "prior passage", True)
+        assert block == ""
+
+    def test_both_includes_names_and_prose(self):
+        block = self.call("both", "Alice and Alice again.", "prior tail here", False)
+        assert "Alice" in block and "prior tail here" in block

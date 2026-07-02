@@ -93,6 +93,7 @@ class ProcessingWorker(QThread):
         creativity = cfg["creativity"]
         temperature = creativity_to_temperature(creativity)
         mode = cfg.get("mode", "summarise_rewrite")  # or "translate"
+        carry_mode = cfg.get("carry_mode", "off")
         summary_lang = cfg.get("summary_lang", "es")
         resume_from = cfg.get("resume_from", 0)
         meta = {
@@ -107,7 +108,10 @@ class ProcessingWorker(QThread):
 
         preview_chars = SETTINGS.get("chapter_title_preview_chars", 50)
         try:
-            all_chapters = epub_io.extract_chapters(epub_path, preview_chars)
+            all_chapters = epub_io.extract_chapters(
+                epub_path, preview_chars,
+                mark_scene_breaks=carry_mode in ("prose", "both"),
+            )
         except Exception as exc:
             self.log.emit(f"Failed to open EPUB: {exc}", "error")
             self.finished.emit(False, "")
@@ -166,7 +170,11 @@ class ProcessingWorker(QThread):
                 self.finished.emit(False, "")
                 return
 
-            chunks = self._split_into_chunks(text, self._chunk_size)
+            chunk_pairs = self._split_into_chunks_with_scenes(
+                text, self._chunk_size
+            )
+            chunks = [c for c, _ in chunk_pairs]
+            scene_flags = [flag for _, flag in chunk_pairs]
             n_chunks = len(chunks)
             if n_chunks > 1:
                 self.log.emit(
@@ -180,6 +188,11 @@ class ProcessingWorker(QThread):
                 chunk_label = (
                     f"{idx + 1}.{chunk_idx + 1}/{n_chunks}"
                     if n_chunks > 1 else str(idx + 1)
+                )
+
+                prior_output = spanish_parts[-1] if spanish_parts else ""
+                context_block = self._carry_context(
+                    carry_mode, chunk, prior_output, scene_flags[chunk_idx],
                 )
 
                 if self._abort:
@@ -196,7 +209,8 @@ class ProcessingWorker(QThread):
                     )
                     spanish = self._ollama_call(
                         model,
-                        build_translation_prompt(chunk, level, idx, creativity),
+                        build_translation_prompt(chunk, level, idx, creativity,
+                                                 context_block=context_block),
                         label=f"Translate {chunk_label}",
                         temperature=temperature,
                     )
@@ -214,7 +228,8 @@ class ProcessingWorker(QThread):
                     )
                     summary = self._ollama_call(
                         model,
-                        build_summary_prompt(chunk, keep_pct),
+                        build_summary_prompt(chunk, keep_pct,
+                                             context_block=context_block),
                         label=f"Summary {chunk_label}",
                         temperature=temperature,
                     )
@@ -235,7 +250,11 @@ class ProcessingWorker(QThread):
                     )
                     summary = self._ollama_call(
                         model,
-                        build_summary_prompt(chunk, keep_pct),
+                        build_summary_prompt(
+                            chunk, keep_pct,
+                            context_block=(context_block
+                                           if summary_lang == "en" else ""),
+                        ),
                         label=f"Summary {chunk_label}",
                         temperature=temperature,
                     )
@@ -260,7 +279,8 @@ class ProcessingWorker(QThread):
                         )
                         rewritten = self._ollama_call(
                             model,
-                            build_rewrite_prompt(summary, level, idx, creativity),
+                            build_rewrite_prompt(summary, level, idx, creativity,
+                                                 context_block=context_block),
                             label=f"Rewrite {chunk_label}",
                             temperature=temperature,
                         )
@@ -306,7 +326,8 @@ class ProcessingWorker(QThread):
                     )
                     spanish = self._ollama_call(
                         model,
-                        build_rewrite_prompt(summary, level, idx, creativity),
+                        build_rewrite_prompt(summary, level, idx, creativity,
+                                             context_block=context_block),
                         label=f"Rewrite {chunk_label}",
                         temperature=temperature,
                     )
@@ -809,6 +830,29 @@ class ProcessingWorker(QThread):
                 seen.add(token)
                 ordered.append(token)
         return ordered
+
+    @staticmethod
+    def _carry_context(
+        carry_mode: str,
+        source_chunk: str,
+        prior_output: str,
+        starts_new_scene: bool,
+        tail_words: int = 120,
+    ) -> str:
+        """Build the per-chunk continuity-context block for *carry_mode*
+        ("off"/"glossary"/"prose"/"both"). Names come from the source chunk;
+        prose tail comes from the previous chunk's output and is suppressed at
+        a scene boundary or when there is no prior output."""
+        from prompts import build_context_block
+        names = (
+            ProcessingWorker.extract_proper_nouns(source_chunk)
+            if carry_mode in ("glossary", "both") else []
+        )
+        prose = ""
+        if (carry_mode in ("prose", "both")
+                and prior_output and not starts_new_scene):
+            prose = " ".join(prior_output.split()[-tail_words:])
+        return build_context_block(names, prose)
 
     def _ollama_call(
         self,
