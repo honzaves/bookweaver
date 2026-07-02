@@ -761,6 +761,36 @@ class ProcessingWorker(QThread):
         """Remove *word* / *phrase* markers the LLM adds around proper nouns."""
         import re
         return re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'\1', text)
+
+    @staticmethod
+    def extract_proper_nouns(text: str) -> list[str]:
+        """Heuristic proper-noun list from English *source* text. Multi-word
+        capitalised spans are always kept; single capitalised words are kept
+        only when they occur capitalised more than once (filtering most
+        sentence-initial noise). De-duplicated, order-preserved. No external
+        dependency — reinforces the name-passthrough the prompts already ask
+        for, so false negatives degrade gracefully."""
+        singles = re.findall(r"\b[A-Z][a-zA-Z'’-]+\b", text)
+        counts: dict[str, int] = {}
+        for w in singles:
+            counts[w] = counts.get(w, 0) + 1
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        # Walk the text once so multi-word spans and qualifying singles keep
+        # first-appearance order.
+        for match in re.finditer(
+            r"\b[A-Z][a-zA-Z'’-]+(?:\s+[A-Z][a-zA-Z'’-]+)*\b", text
+        ):
+            token = match.group(0)
+            is_multiword = " " in token
+            if not is_multiword and counts.get(token, 0) < 2:
+                continue
+            if token not in seen:
+                seen.add(token)
+                ordered.append(token)
+        return ordered
+
     def _ollama_call(
         self,
         model: str,

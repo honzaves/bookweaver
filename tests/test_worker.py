@@ -531,3 +531,32 @@ class TestCollectChapterIdeas:
 
     def test_empty_results_returns_empty_string(self):
         assert ProcessingWorker._collect_chapter_ideas([], "Key ideas") == ""
+
+
+class TestExtractProperNouns:
+    def call(self, text):
+        return ProcessingWorker.extract_proper_nouns(text)
+
+    def test_multiword_name_captured(self):
+        names = self.call("They met at New York Harbor before dawn.")
+        assert "New York Harbor" in names
+
+    def test_repeated_single_name_captured(self):
+        names = self.call("Alice ran. Later, Alice returned home.")
+        assert "Alice" in names
+
+    def test_sentence_initial_common_word_filtered(self):
+        # "The" and "Later" begin sentences once each → excluded
+        names = self.call("The dog barked. Later it slept.")
+        assert "The" not in names
+        assert "Later" not in names
+
+    def test_dedup_preserves_order(self):
+        # Both names must recur so both survive the "singles need count ≥ 2"
+        # rule; then assert uniqueness and first-appearance order.
+        names = self.call("Paris is grand. Rome is old. Paris and Rome shine.")
+        assert len(names) == len(set(names))  # de-duplicated
+        assert names.index("Paris") < names.index("Rome")
+
+    def test_empty_text(self):
+        assert self.call("") == []
