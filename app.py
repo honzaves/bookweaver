@@ -394,10 +394,11 @@ class BookWeaverApp(QMainWindow):
             self._carry_combo.addItem(label, userData=value)
         self._carry_combo.setCurrentIndex(0)
         self._carry_combo.setToolTip(
-            "Only affects chapters split into multiple chunks. 'Names' "
-            "reinforces proper-noun consistency; 'Prose tail' carries the "
-            "end of the previous chunk for smoother transitions, reset at "
-            "scene breaks."
+            "'Names' reinforces proper-noun consistency; 'Prose tail' "
+            "carries the end of the previous chunk for smoother "
+            "transitions, reset at scene breaks. Prose modes also split "
+            "chapters at scene breaks (may increase LLM calls) and "
+            "restore a '* * *' separator in the output."
         )
         carry_row.addWidget(self._carry_combo)
         carry_row.addStretch()

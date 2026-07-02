@@ -117,17 +117,17 @@ All user-editable values live in `bookweaver.json`:
 | `level` | `str` | CEFR level: `"B1"`, `"B2"`, `"C1"`, or `"C2"` |
 | `generate_mp3` | `bool` | Synthesise an MP3 audiobook after the text output (requires `"txt"` in `out_format` and the optional Kokoro install — see `kokoro.md`) |
 | `voice` | `str \| None` | Kokoro voice id (e.g. `"ef_dora"`); `None` when MP3 is off |
-| `carry_mode` | `str` | `"off"` (default), `"glossary"`, `"prose"`, or `"both"` — cross-chunk continuity; only affects chapters split into multiple chunks (see below) |
+| `carry_mode` | `str` | `"off"` (default), `"glossary"`, `"prose"`, or `"both"` — cross-chunk continuity. `glossary` only affects chapters split into multiple chunks; `prose`/`both` also hard-segment any chapter at scene breaks, which can turn a single-chunk chapter into several (see below) |
 | `target_lang` | `str` | `"es"` or `"en"` — from `TARGET_LANG[mode]` in `settings.py`; selects the voice list and Kokoro language |
 
 ### Per chapter
 
-1. **Chunk** — if the chapter exceeds `chunk_size` words, `_split_into_chunks()`
-   splits it at paragraph boundaries into chunks of at most `chunk_size` words.
-   The run loop actually calls `_split_into_chunks_with_scenes()`, a wrapper
-   that first hard-segments at scene-break sentinels (when present), strips
-   them, delegates to `_split_into_chunks()`, and flags scene-starting chunks
-   for the continuity carry.
+1. **Chunk** — `run()` calls `_split_into_chunks_with_scenes()`, which first
+   hard-segments the chapter at scene-break sentinels (when present), strips
+   them, and flags scene-starting chunks for the continuity carry. Within
+   each segment it delegates to `_split_into_chunks()`, which splits text
+   exceeding `chunk_size` words at paragraph boundaries into chunks of at
+   most `chunk_size` words.
 
 2. **Process each chunk** — branched by `mode`:
 
@@ -147,7 +147,11 @@ All user-editable values live in `bookweaver.json`:
      After the chunk loop, one `build_key_ideas_prompt` call per chapter appends
      a localized "Key ideas / Ideas clave" section (1–5 bullets) to the body.
 
-3. **Rejoin** — output chunks are joined with `\n\n` into a single chapter result.
+3. **Rejoin** — output chunks are joined into a single chapter result via
+   `_rejoin_with_scene_breaks()`: a `* * *` paragraph is restored before each
+   chunk flagged as starting a new scene (the splitter stripped the original
+   separator lines, and `tts.py` keys scene pauses off such lines). With no
+   flags set the result is byte-identical to a plain `\n\n` join.
 
 4. **Per-chapter file (txt only)** — once a chapter completes, if `"txt"` is in
    `out_format`, its result is also written to
@@ -160,8 +164,11 @@ All user-editable values live in `bookweaver.json`:
 ### Cross-chunk continuity (`carry_mode`)
 
 Chosen per run via the "Cross-chunk continuity" QComboBox in the Options
-group; rides resume automatically via the `**config` spread. Only affects
-chapters split into multiple chunks. Two independent mechanisms:
+group; rides resume automatically via the `**config` spread. Glossary mode
+only affects chapters split into multiple chunks; prose/both additionally
+hard-segment **any** chapter containing a scene break — a short single-chunk
+chapter with one `* * *` becomes two chunks and thus two (sets of) LLM
+calls. Two independent mechanisms:
 
 - **Glossary** (`"glossary"`/`"both"`) — stateless per-chunk proper-noun
   protection. `ProcessingWorker.extract_proper_nouns` (pure regex heuristic:
@@ -182,7 +189,9 @@ titles are identical with and without marking — `selected_chapters` stays
 aligned between the app's (unmarked) and the worker's (marked) reads.
 `_split_into_chunks_with_scenes` strips the sentinel and flags
 scene-starting chunks; the sentinel never reaches a prompt or a written
-output file.
+output file. At rejoin time, `_rejoin_with_scene_breaks` restores a `* * *`
+paragraph before each scene-starting chunk, so written output keeps its
+scene separators and `tts.py` still inserts its scene-break pauses.
 
 Both mechanisms feed `prompts.build_context_block(names, prior_prose)`, a
 delimited "CONTINUITY CONTEXT" block spliced — via the trailing
