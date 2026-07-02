@@ -382,6 +382,27 @@ class BookWeaverApp(QMainWindow):
         chunk_row.addStretch()
         ol.addLayout(chunk_row)
 
+        carry_row = QHBoxLayout()
+        carry_row.addWidget(QLabel("Cross-chunk continuity:"))
+        self._carry_combo = QComboBox()
+        for label, value in [
+            ("Off", "off"),
+            ("Names only (protect proper nouns)", "glossary"),
+            ("Prose tail (scene-gated)", "prose"),
+            ("Both", "both"),
+        ]:
+            self._carry_combo.addItem(label, userData=value)
+        self._carry_combo.setCurrentIndex(0)
+        self._carry_combo.setToolTip(
+            "Only affects chapters split into multiple chunks. 'Names' "
+            "reinforces proper-noun consistency; 'Prose tail' carries the "
+            "end of the previous chunk for smoother transitions, reset at "
+            "scene breaks."
+        )
+        carry_row.addWidget(self._carry_combo)
+        carry_row.addStretch()
+        ol.addLayout(carry_row)
+
         form.addWidget(grp)
 
     def _build_epub_meta_widget(self) -> QWidget:
@@ -550,6 +571,7 @@ class BookWeaverApp(QMainWindow):
             "creativity": self._creativity_slider.value(),
             "mode": mode,
             "chunk_size": self._chunk_spin.value(),
+            "carry_mode": self._carry_combo.currentData(),
             "meta_title": self._meta_title.text().strip(),
             "meta_creator": self._meta_creator.text().strip(),
             "meta_language": self._meta_language.text().strip() or "es",
