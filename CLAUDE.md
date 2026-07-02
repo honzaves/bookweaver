@@ -32,9 +32,9 @@ boundaries, processed independently, and rejoined.
 |---|---|---|
 | `main.py` | Entry point only | Rarely |
 | `app.py` | Main window, UI wiring, slot logic | For new UI elements |
-| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); shared by app & worker | For chapter extraction/title logic |
+| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); opt-in `mark_scene_breaks` scene-break sentinel; shared by app & worker | For chapter extraction/title logic |
 | `worker.py` | Background thread, pipeline, file output (no longer extracts chapters inline — delegates to `epub_io`) | For pipeline changes |
-| `prompts.py` | All LLM prompt strings | For prompt tuning |
+| `prompts.py` | All LLM prompt strings, incl. `build_context_block` (continuity) | For prompt tuning |
 | `widgets.py` | All reusable Qt widgets | For new/changed widgets |
 | `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
 | `tts.py` | Kokoro TTS → MP3 audiobook with ID3 chapters; optional deps behind an import gate | For TTS/audio changes |
@@ -117,12 +117,17 @@ All user-editable values live in `bookweaver.json`:
 | `level` | `str` | CEFR level: `"B1"`, `"B2"`, `"C1"`, or `"C2"` |
 | `generate_mp3` | `bool` | Synthesise an MP3 audiobook after the text output (requires `"txt"` in `out_format` and the optional Kokoro install — see `kokoro.md`) |
 | `voice` | `str \| None` | Kokoro voice id (e.g. `"ef_dora"`); `None` when MP3 is off |
+| `carry_mode` | `str` | `"off"` (default), `"glossary"`, `"prose"`, or `"both"` — cross-chunk continuity; only affects chapters split into multiple chunks (see below) |
 | `target_lang` | `str` | `"es"` or `"en"` — from `TARGET_LANG[mode]` in `settings.py`; selects the voice list and Kokoro language |
 
 ### Per chapter
 
 1. **Chunk** — if the chapter exceeds `chunk_size` words, `_split_into_chunks()`
    splits it at paragraph boundaries into chunks of at most `chunk_size` words.
+   The run loop actually calls `_split_into_chunks_with_scenes()`, a wrapper
+   that first hard-segments at scene-break sentinels (when present), strips
+   them, delegates to `_split_into_chunks()`, and flags scene-starting chunks
+   for the continuity carry.
 
 2. **Process each chunk** — branched by `mode`:
 
@@ -151,6 +156,42 @@ All user-editable values live in `bookweaver.json`:
    assembled `.txt` use the shared `ProcessingWorker._chapter_block` formatter,
    so their per-chapter formatting stays identical. The assembled `.txt` is
    still written normally after all chapters.
+
+### Cross-chunk continuity (`carry_mode`)
+
+Chosen per run via the "Cross-chunk continuity" QComboBox in the Options
+group; rides resume automatically via the `**config` spread. Only affects
+chapters split into multiple chunks. Two independent mechanisms:
+
+- **Glossary** (`"glossary"`/`"both"`) — stateless per-chunk proper-noun
+  protection. `ProcessingWorker.extract_proper_nouns` (pure regex heuristic:
+  multi-word capitalised spans always; single capitalised words only when
+  capitalised ≥2 times) runs on each chunk's **source** text, so it costs no
+  extra LLM calls and is resume-trivial (re-derived from source every time).
+- **Prose** (`"prose"`/`"both"`) — the last 120 words of the previous chunk's
+  **output** (`spanish_parts[-1]`), suppressed at scene breaks and at chapter
+  starts. Within-chapter only, so resume (which restarts at a chapter
+  boundary) needs no carry state.
+
+**Scene breaks:** when `carry_mode` is prose/both, the worker extracts with
+`epub_io.extract_chapters(..., mark_scene_breaks=True)`, which replaces
+`<hr>` elements and separator-only lines (`* * *`, `---`, `⁂`) with the
+`SCENE_BREAK = "␞"` sentinel. The `MIN_CHAPTER_CHARS` filter and title
+resolution always run on **unmarked** text, so chapter count, indices, and
+titles are identical with and without marking — `selected_chapters` stays
+aligned between the app's (unmarked) and the worker's (marked) reads.
+`_split_into_chunks_with_scenes` strips the sentinel and flags
+scene-starting chunks; the sentinel never reaches a prompt or a written
+output file.
+
+Both mechanisms feed `prompts.build_context_block(names, prior_prose)`, a
+delimited "CONTINUITY CONTEXT" block spliced — via the trailing
+`context_block: str = ""` parameter — into the **body-producing** call per
+mode: `translate` → translation call; `summarise_rewrite` and
+`summarise_key_ideas` (es) → rewrite call; `summarise_only` and
+`summarise_key_ideas` (en) → summary call. In the key-ideas branch the
+shared summary call receives the block only when `summary_lang == "en"`,
+avoiding double-injection on the Spanish path.
 
 ### After all chapters (optional MP3)
 
