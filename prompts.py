@@ -80,9 +80,41 @@ def _creativity_instruction(level: int) -> str:
 
 
 # ──────────────────────────────────────────────────────────────
+#  CONTINUITY CONTEXT
+# ──────────────────────────────────────────────────────────────
+def build_context_block(names: list[str] | None, prior_prose: str) -> str:
+    """Assemble a delimited continuity-context block from a proper-noun
+    protection list and/or the tail of the previous chunk's output. Returns
+    "" when both are empty. The block is read-only context — the builders
+    that embed it keep the operative 'output only the new text' rule last."""
+    names = names or []
+    prior_prose = (prior_prose or "").strip()
+    if not names and not prior_prose:
+        return ""
+    parts = [
+        "CONTINUITY CONTEXT (read for consistency only — do NOT translate, "
+        "repeat, summarise, or output this block):"
+    ]
+    if names:
+        parts.append(
+            "- Keep these names exactly as written: " + ", ".join(names) + "."
+        )
+    if prior_prose:
+        parts.append(
+            "- The preceding passage ended like this (continue smoothly, do "
+            f"not repeat it): \"{prior_prose}\""
+        )
+    return "\n".join(parts) + "\n\n"
+
+
+# ──────────────────────────────────────────────────────────────
 #  PUBLIC BUILDERS
 # ──────────────────────────────────────────────────────────────
-def build_summary_prompt(chapter_text: str, keep_pct: int) -> str:
+def build_summary_prompt(
+    chapter_text: str,
+    keep_pct: int,
+    context_block: str = "",
+) -> str:
     """
     Return a prompt that asks the LLM to condense *chapter_text*,
     retaining approximately *keep_pct* percent of the original length.
@@ -106,6 +138,7 @@ def build_summary_prompt(chapter_text: str, keep_pct: int) -> str:
         "- Write in clear, neutral English prose.\n"
         "- Do NOT add commentary, headers, or meta-text. "
         "Output only the condensed text.\n\n"
+        f"{context_block}"
         f"CHAPTER TEXT:\n{chapter_text}\n"
     )
 
@@ -115,6 +148,7 @@ def build_translation_prompt(
     level: str,
     chapter_index: int,
     creativity: int = 5,
+    context_block: str = "",
 ) -> str:
     """
     Return a prompt that asks the LLM to translate *chunk_text* directly
@@ -144,6 +178,7 @@ def build_translation_prompt(
         "stay within the target level throughout.\n"
         f"- This is chapter {chapter_index + 1}.\n\n"
         f"REMINDER — you are writing for a CEFR {level} reader. Apply the language guidance strictly.\n\n"
+        f"{context_block}"
         f"SOURCE TEXT (English):\n{chunk_text}\n"
     )
 
@@ -153,6 +188,7 @@ def build_rewrite_prompt(
     level: str,
     chapter_index: int,
     creativity: int = 5,
+    context_block: str = "",
 ) -> str:
     """
     Return a prompt that asks the LLM to rewrite *summary* as a Spanish
@@ -176,6 +212,7 @@ def build_rewrite_prompt(
         "Output only the narrative text.\n"
         "- Make it feel like a real book chapter, not a summary.\n"
         f"- This is chapter {chapter_index + 1}.\n\n"
+        f"{context_block}"
         f"SOURCE SUMMARY (English):\n{summary}\n"
     )
 

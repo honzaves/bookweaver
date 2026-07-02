@@ -17,8 +17,10 @@ import pytest
 from prompts import (
     _LEVEL_GUIDANCE,
     _creativity_instruction,
+    build_context_block,
     build_rewrite_prompt,
     build_summary_prompt,
+    build_translation_prompt,
     build_key_ideas_prompt,
     build_book_key_ideas_prompt,
     KEY_IDEAS_HEADER,
@@ -310,3 +312,35 @@ class TestBuildBookKeyIdeasPrompt:
 
     def test_english_writes_in_english(self):
         assert "Write entirely in English." in build_book_key_ideas_prompt(self.IDEAS, "en")
+
+
+# ──────────────────────────────────────────────────────────────
+#  build_context_block  +  prompt plumbing
+# ──────────────────────────────────────────────────────────────
+class TestContextBlock:
+    def test_empty_inputs_return_empty(self):
+        assert build_context_block(None, "") == ""
+        assert build_context_block([], "") == ""
+
+    def test_names_listed(self):
+        block = build_context_block(["Alice", "New York"], "")
+        assert "Alice" in block and "New York" in block
+        assert "do NOT translate" in block or "do not translate" in block.lower()
+
+    def test_prose_tail_included(self):
+        block = build_context_block(None, "…the end of the prior passage.")
+        assert "the end of the prior passage" in block
+
+    def test_translation_prompt_embeds_context_before_source(self):
+        block = build_context_block(["Alice"], "")
+        prompt = build_translation_prompt(
+            "Hello.", "B1", 0, 5, context_block=block
+        )
+        assert "Alice" in prompt
+        # context appears before the SOURCE TEXT section
+        assert prompt.index("Alice") < prompt.index("SOURCE TEXT")
+
+    def test_builders_accept_empty_context_unchanged(self):
+        # default empty context must not inject the block label
+        p = build_summary_prompt("Some text.", 50)
+        assert "CONTINUITY CONTEXT" not in p
