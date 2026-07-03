@@ -511,6 +511,16 @@ class ProcessingWorker(QThread):
         self.finished.emit(True, ", ".join(str(p) for p in out_paths))
 
     # ── post-run language-level check (optional, log-only) ────
+    @staticmethod
+    def _readability_line(body: str) -> str | None:
+        """Format the raw (uncalibrated) readability advisory line, or None
+        when textstat is unavailable. Log-only; never triggers regeneration."""
+        import level_detector
+        score = level_detector.textstat_readability(body)
+        if score is None:
+            return None
+        return f"Readability (Fernández Huerta, raw ease): {score}"
+
     def _run_level_check(
         self,
         results: list[tuple[str, str]],
@@ -534,6 +544,9 @@ class ProcessingWorker(QThread):
             for line in level_detector.format_report(
                 assessment, target_level
             ).splitlines():
+                self.log.emit(f"   {line}", "muted")
+            line = self._readability_line(body)
+            if line:
                 self.log.emit(f"   {line}", "muted")
         except Exception as exc:
             self.log.emit(f"Level check failed: {exc}", "warning")

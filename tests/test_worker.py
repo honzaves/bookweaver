@@ -677,6 +677,19 @@ class TestLevelCheck:
             w._run_level_check([("t", "b")], "B1", "fakemodel")  # must not raise
 
 
+class TestReadabilityLine:
+    def test_readability_line_formats_score(self, monkeypatch):
+        import level_detector
+        monkeypatch.setattr(level_detector, "textstat_readability", lambda b: 64.0)
+        line = ProcessingWorker._readability_line("Texto en español.")
+        assert "64.0" in line and "Fernández" in line
+
+    def test_readability_line_none_when_unavailable(self, monkeypatch):
+        import level_detector
+        monkeypatch.setattr(level_detector, "textstat_readability", lambda b: None)
+        assert ProcessingWorker._readability_line("Texto.") is None
+
+
 class TestValidatedChunk:
     def _worker(self):
         w = ProcessingWorker.__new__(ProcessingWorker)  # bypass QThread init
