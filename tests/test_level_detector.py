@@ -1,3 +1,5 @@
+import pytest
+
 import level_detector
 
 
@@ -35,3 +37,29 @@ class TestBandFromMetrics:
     def test_returns_most_advanced_axis(self):
         # long sentences alone (C1 band on length) outrank simple vocab
         assert level_detector.band_from_metrics(self._m(24.0, 2.0, 0.0)) == "C1"
+
+
+class TestProfileText:
+    @pytest.fixture(scope="class")
+    def nlp_available(self):
+        spacy = pytest.importorskip("spacy")
+        if not spacy.util.is_package(level_detector.SPACY_MODEL):
+            pytest.skip(f"{level_detector.SPACY_MODEL} not installed")
+        pytest.importorskip("wordfreq")
+
+    def test_simple_text_profiles_low(self, nlp_available):
+        text = "El niño come pan. La casa es grande. El perro corre."
+        result = level_detector.profile_text(text)
+        assert result["subjunctive_ratio"] == 0.0
+        assert result["band"] in ("B1", "B2")
+        assert result["n_words"] > 0
+
+    def test_subjunctive_is_detected(self, nlp_available):
+        text = "Quiero que vengas pronto para que hablemos del asunto."
+        result = level_detector.profile_text(text)
+        assert result["subjunctive_ratio"] > 0.0
+
+    def test_empty_text_is_safe(self, nlp_available):
+        result = level_detector.profile_text("")
+        assert result["n_words"] == 0
+        assert result["band"] in ("B1", "B2", "C1", "C2")

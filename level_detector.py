@@ -54,3 +54,67 @@ def band_from_metrics(metrics: dict) -> str:
         if sent <= max_sent and rare <= max_rare and subj <= max_subj:
             return band
     return "C2"
+
+
+# ──────────────────────────────────────────────────────────────
+#  FEATURE PROFILER  (requires spaCy + wordfreq)
+# ──────────────────────────────────────────────────────────────
+# wordfreq Zipf scale: < 3.5 ≈ below "fairly common". Note: frequency is
+# looked up on the *surface* form (the lemmatizer is excluded for speed), so
+# inflected Spanish forms score slightly rarer than their lemmas — rare_word_pct
+# therefore runs a little hot. This is an accepted, tunable approximation.
+RARE_ZIPF_CUTOFF = 3.5
+
+_NLP = None
+
+
+def _load_nlp():
+    """Load and cache the Spanish spaCy pipeline. Excludes the parser, NER,
+    and lemmatizer — the dependency parser is memory-heavy on whole-book
+    texts (on the order of 1 GB per 100k chars) and only sentence boundaries
+    are needed, which the cheap rule-based sentencizer provides. The
+    morphologizer stays: it supplies the Mood=Sub feature the profiler
+    counts."""
+    global _NLP
+    if _NLP is None:
+        import spacy
+        _NLP = spacy.load(SPACY_MODEL, exclude=["parser", "ner", "lemmatizer"])
+        if "sentencizer" not in _NLP.pipe_names:
+            _NLP.add_pipe("sentencizer")
+    return _NLP
+
+
+def profile_text(text: str) -> dict:
+    """Return deterministic CEFR features for *text* (Spanish)."""
+    from wordfreq import zipf_frequency
+
+    nlp = _load_nlp()
+    # Large books can exceed spaCy's default 1,000,000-char ceiling; raise it
+    # for this call so big concatenated outputs still profile (safe now that
+    # the memory-heavy parser is excluded in _load_nlp).
+    nlp.max_length = max(nlp.max_length, len(text) + 1)
+    doc = nlp(text)
+
+    sentences = [s for s in doc.sents if s.text.strip()]
+    content = [t for t in doc if t.is_alpha]
+    n_words = len(content)
+
+    verbs = [t for t in doc if t.pos_ in ("VERB", "AUX")]
+    subj_verbs = [t for t in verbs if "Mood=Sub" in str(t.morph)]
+    rare = [
+        t for t in content
+        if zipf_frequency(t.text.lower(), "es") < RARE_ZIPF_CUTOFF
+    ]
+
+    mean_sentence_len = (n_words / len(sentences)) if sentences else 0.0
+    rare_word_pct = (100.0 * len(rare) / n_words) if n_words else 0.0
+    subjunctive_ratio = (100.0 * len(subj_verbs) / len(verbs)) if verbs else 0.0
+
+    metrics = {
+        "mean_sentence_len": round(mean_sentence_len, 2),
+        "rare_word_pct": round(rare_word_pct, 2),
+        "subjunctive_ratio": round(subjunctive_ratio, 2),
+    }
+    metrics["band"] = band_from_metrics(metrics)
+    metrics["n_words"] = n_words
+    return metrics
