@@ -58,6 +58,22 @@ def band_from_metrics(metrics: dict) -> str:
     return "C2"
 
 
+# Ordered CEFR bands the profiler can emit; index gives an ordinal so the
+# worker can measure how far a chunk's level sits above its target.
+BAND_ORDER: list[str] = ["B1", "B2", "C1", "C2"]
+
+
+def band_distance(detected: str, target: str) -> int:
+    """Signed distance of *detected* above *target* on BAND_ORDER.
+
+    Positive => harder than target (candidate for regeneration); negative =>
+    easier; 0 => equal or a band not in BAND_ORDER (never regenerate on a band
+    we cannot place)."""
+    if detected not in BAND_ORDER or target not in BAND_ORDER:
+        return 0
+    return BAND_ORDER.index(detected) - BAND_ORDER.index(target)
+
+
 # ──────────────────────────────────────────────────────────────
 #  FEATURE PROFILER  (requires spaCy + wordfreq)
 # ──────────────────────────────────────────────────────────────

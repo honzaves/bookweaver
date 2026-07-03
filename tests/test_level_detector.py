@@ -118,3 +118,23 @@ class TestAssessAndReport:
         assert result["whole"] is None
         report = level_detector.format_report(result, "B1")
         assert "profiler unavailable" in report.lower()
+
+
+class TestBandDistance:
+    def test_one_above_is_distance_one(self):
+        assert level_detector.band_distance("B2", "B1") == 1
+        assert level_detector.band_distance("C1", "B2") == 1
+
+    def test_two_above_is_distance_two(self):
+        assert level_detector.band_distance("C1", "B1") == 2
+        assert level_detector.band_distance("C2", "B2") == 2
+
+    def test_below_target_is_negative(self):
+        assert level_detector.band_distance("B1", "B2") == -1
+
+    def test_equal_is_zero(self):
+        assert level_detector.band_distance("B2", "B2") == 0
+
+    def test_unknown_band_is_zero(self):
+        assert level_detector.band_distance("?", "B1") == 0
+        assert level_detector.band_distance("A2", "B1") == 0
