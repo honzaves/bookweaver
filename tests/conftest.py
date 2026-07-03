@@ -9,6 +9,7 @@ QThread / pyqtSignal at module level) can be collected in environments
 where Qt is not installed.  The stubs are just enough to satisfy the
 import; actual Qt behaviour is not needed for any of our unit tests.
 """
+import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -61,7 +62,17 @@ _make_pyqt6_stubs()
 # Empty stubs keep the suite fast and runnable on machines without
 # Kokoro installed. numpy must NOT be stubbed: pytest.approx inspects
 # sys.modules["numpy"] and an empty stub breaks it; tts.py's gate
-# already tolerates numpy being genuinely absent.
+# already tolerates numpy being genuinely absent. A stub is only
+# inserted when the package is genuinely absent — shadowing a real
+# install (e.g. torch pulled in by spaCy) breaks anything that later
+# imports the real thing.
+def _is_absent(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is None
+    except (ImportError, ValueError):
+        return True
+
 for _name in ("kokoro", "soundfile", "lameenc", "mutagen", "mutagen.id3",
               "torch"):
-    sys.modules.setdefault(_name, ModuleType(_name))
+    if _is_absent(_name):
+        sys.modules.setdefault(_name, ModuleType(_name))
