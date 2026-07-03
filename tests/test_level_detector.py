@@ -138,3 +138,16 @@ class TestBandDistance:
     def test_unknown_band_is_zero(self):
         assert level_detector.band_distance("?", "B1") == 0
         assert level_detector.band_distance("A2", "B1") == 0
+
+
+class TestTextstatReadability:
+    def test_textstat_readability_none_when_unavailable(self, monkeypatch):
+        monkeypatch.setattr(level_detector, "TEXTSTAT_AVAILABLE", False)
+        assert level_detector.textstat_readability("Hola mundo.") is None
+
+    def test_textstat_readability_returns_float_when_available(self, monkeypatch):
+        monkeypatch.setattr(level_detector, "TEXTSTAT_AVAILABLE", True)
+        fake = type("T", (), {"set_lang": staticmethod(lambda l: None),
+                              "fernandez_huerta": staticmethod(lambda t: 72.34)})
+        monkeypatch.setitem(__import__("sys").modules, "textstat", fake)
+        assert level_detector.textstat_readability("Hola mundo.") == 72.3

@@ -27,6 +27,13 @@ try:
 except ImportError as exc:  # pragma: no cover - exercised via stubs
     PROFILER_IMPORT_ERROR = str(exc)
 
+TEXTSTAT_AVAILABLE = False
+try:
+    import textstat  # noqa: F401
+    TEXTSTAT_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised via monkeypatch
+    pass
+
 
 # ──────────────────────────────────────────────────────────────
 #  DETERMINISTIC BANDING  (starting thresholds — tunable)
@@ -136,6 +143,17 @@ def profile_text(text: str) -> dict:
     metrics["band"] = band_from_metrics(metrics)
     metrics["n_words"] = n_words
     return metrics
+
+
+def textstat_readability(text: str) -> float | None:
+    """Raw Fernández-Huerta readability ease for Spanish *text* (higher =
+    easier). Returns None when textstat is unavailable. Uncalibrated — for
+    advisory logging and drift-spotting only, never a gate."""
+    if not TEXTSTAT_AVAILABLE:
+        return None
+    import textstat
+    textstat.set_lang("es")
+    return round(textstat.fernandez_huerta(text), 1)
 
 
 # ──────────────────────────────────────────────────────────────
