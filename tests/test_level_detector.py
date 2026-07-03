@@ -1,3 +1,5 @@
+from unittest.mock import patch, MagicMock
+
 import pytest
 
 import level_detector
@@ -63,3 +65,25 @@ class TestProfileText:
         result = level_detector.profile_text("")
         assert result["n_words"] == 0
         assert result["band"] in ("B1", "B2", "C1", "C2")
+
+
+class TestJudge:
+    def test_build_judge_prompt_mentions_level(self):
+        p = level_detector.build_judge_prompt("Hola mundo.", "B1")
+        assert "B1" in p
+        assert "Hola mundo." in p
+
+    def test_judge_parses_cefr_token(self):
+        fake = MagicMock()
+        fake.json.return_value = {"response": "Assessed level: C1. The text uses subjunctive."}
+        fake.raise_for_status.return_value = None
+        client = MagicMock()
+        client.__enter__.return_value.post.return_value = fake
+        with patch("httpx.Client", return_value=client):
+            result = level_detector.judge_level("texto", "B2", "fakemodel")
+        assert result["verdict"] == "C1"
+
+    def test_judge_handles_error_gracefully(self):
+        with patch("httpx.Client", side_effect=RuntimeError("boom")):
+            result = level_detector.judge_level("texto", "B2", "fakemodel")
+        assert result["verdict"] == "?"

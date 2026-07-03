@@ -13,6 +13,8 @@ app, worker, or widgets.
 """
 from __future__ import annotations
 
+import re
+
 SPACY_MODEL = "es_core_news_sm"
 
 PROFILER_AVAILABLE = False
@@ -118,3 +120,59 @@ def profile_text(text: str) -> dict:
     metrics["band"] = band_from_metrics(metrics)
     metrics["n_words"] = n_words
     return metrics
+
+
+# ──────────────────────────────────────────────────────────────
+#  OLLAMA HELPER + LLM JUDGE
+# ──────────────────────────────────────────────────────────────
+_CEFR_RE = re.compile(r"\b([ABC][12])\b")
+
+
+def ollama_generate(model: str, prompt: str, timeout: int = 1200) -> str | None:
+    """Send *prompt* to the local Ollama instance and return the response
+    text, or None on any error. Standalone twin of worker._ollama_call so
+    the CLI does not depend on the QThread worker."""
+    try:
+        import httpx
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.0},
+                },
+            )
+            response.raise_for_status()
+            return response.json().get("response", "").strip() or None
+    except Exception:
+        return None
+
+
+def build_judge_prompt(text: str, target_level: str) -> str:
+    """Prompt asking the model to assess the CEFR level of *text*."""
+    return (
+        "You are a CEFR assessment expert for Spanish. Read the passage and "
+        "judge the single CEFR level that best describes its difficulty.\n\n"
+        "RULES:\n"
+        "- Choose exactly one of: A1, A2, B1, B2, C1, C2.\n"
+        "- Base the judgement on vocabulary frequency, grammatical complexity "
+        "(especially subjunctive/conditional use), and sentence length.\n"
+        f"- The text was generated targeting CEFR {target_level}; say whether "
+        "it meets, falls below, or exceeds that target.\n"
+        "- Begin your reply with 'Assessed level: <LEVEL>' on its own line, "
+        "then one or two sentences of justification.\n\n"
+        f"PASSAGE:\n{text}\n"
+    )
+
+
+def judge_level(
+    text: str, target_level: str, model: str, timeout: int = 1200
+) -> dict:
+    """Ask the local Ollama model to assess *text*'s CEFR level."""
+    raw = ollama_generate(model, build_judge_prompt(text, target_level), timeout)
+    if not raw:
+        return {"verdict": "?", "raw": ""}
+    match = _CEFR_RE.search(raw)
+    return {"verdict": match.group(1) if match else "?", "raw": raw}
