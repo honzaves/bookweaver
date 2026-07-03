@@ -18,26 +18,28 @@ touching any other part of the application.
 # ──────────────────────────────────────────────────────────────
 _LEVEL_GUIDANCE: dict[str, str] = {
     "B1": (
-        "Use short, simple sentences. Stick to the present and past tenses "
-        "(preterite). Avoid idiomatic expressions and complex subordinate "
-        "clauses. Vocabulary should be high-frequency and accessible."
+        "Keep sentences short — aim for 12 words or fewer. Use only the "
+        "present and the simple past (pretérito). Avoid the subjunctive, the "
+        "conditional, and compound or literary tenses. No idioms and no "
+        "subordinate clauses beyond a simple 'que'. Use only high-frequency, "
+        "everyday vocabulary."
     ),
     "B2": (
-        "Use varied sentence structures including subordinate clauses. Mix "
-        "present, past (preterite and imperfect), and future tenses naturally. "
-        "Include some common idiomatic expressions. Vocabulary can be broader "
-        "but avoid rare or literary terms."
+        "Keep most sentences under 18 words. Use present, past (pretérito and "
+        "imperfecto), future and conditional naturally; use the subjunctive "
+        "sparingly and only in common constructions. A few common idioms are "
+        "fine. Prefer common vocabulary and avoid rare or literary terms."
     ),
     "C1": (
         "Write natural, fluid Spanish prose with full command of tenses "
-        "including subjunctive. Use idiomatic expressions and figurative "
-        "language where appropriate. Vary sentence length and rhythm for "
-        "literary effect."
+        "including the subjunctive. Use idiomatic and figurative language "
+        "where it fits. Vary sentence length and rhythm for literary effect, "
+        "but keep it readable."
     ),
     "C2": (
-        "Write at native literary level. Full command of all tenses, including "
-        "complex subjunctive and conditional constructions. Rich vocabulary "
-        "including stylistic register variation, rhythm, and literary devices."
+        "Write at native literary level: full command of all tenses, complex "
+        "subjunctive and conditional constructions, rich vocabulary, register "
+        "variation, rhythm and literary devices."
     ),
 }
 

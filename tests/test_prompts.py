@@ -240,6 +240,15 @@ class TestLevelGuidance:
         assert any(w in b1 for w in ("simple", "short", "high-frequency", "basic"))
         assert any(w in c2 for w in ("native", "literary", "complex", "full command"))
 
+    def test_b1_guidance_caps_sentence_length(self):
+        assert "12 words" in prompts._LEVEL_GUIDANCE["B1"]
+
+    def test_b2_guidance_caps_sentence_length(self):
+        assert "18 words" in prompts._LEVEL_GUIDANCE["B2"]
+
+    def test_b1_guidance_avoids_subjunctive(self):
+        assert "subjunctive" in prompts._LEVEL_GUIDANCE["B1"].lower()
+
 
 # ──────────────────────────────────────────────────────────────
 #  Key-ideas headers
