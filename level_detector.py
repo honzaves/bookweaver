@@ -176,3 +176,99 @@ def judge_level(
         return {"verdict": "?", "raw": ""}
     match = _CEFR_RE.search(raw)
     return {"verdict": match.group(1) if match else "?", "raw": raw}
+
+
+# ──────────────────────────────────────────────────────────────
+#  DOCUMENT ASSESSMENT + REPORT
+# ──────────────────────────────────────────────────────────────
+def _third(words: list[str], which: str) -> str:
+    n = len(words)
+    if n == 0:
+        return ""
+    cut = max(1, n // 3)
+    return " ".join(words[:cut] if which == "first" else words[-cut:])
+
+
+def assess_document(
+    text: str,
+    target_level: str,
+    model: str | None = None,
+    timeout: int = 1200,
+    run_llm: bool = True,
+) -> dict:
+    """Profile the whole text plus its first/last third (drift), and
+    optionally run the LLM-judge. Profiler keys are None when unavailable."""
+    out: dict = {"whole": None, "first_third": None, "last_third": None,
+                 "judge": None}
+    if PROFILER_AVAILABLE:
+        words = text.split()
+        out["whole"] = profile_text(text)
+        out["first_third"] = profile_text(_third(words, "first"))
+        out["last_third"] = profile_text(_third(words, "last"))
+    if run_llm and model:
+        out["judge"] = judge_level(text, target_level, model, timeout)
+    return out
+
+
+def format_report(assessment: dict, target_level: str) -> str:
+    """Render *assessment* as a human-readable multi-line report."""
+    lines = [f"CEFR assessment (target: {target_level})", "-" * 40]
+    whole = assessment["whole"]
+    if whole is None:
+        lines.append("Feature profiler unavailable (spaCy/wordfreq not "
+                     "installed) — install spacy, wordfreq and the "
+                     "es_core_news_sm wheel to enable it.")
+    else:
+        lines.append(
+            f"Whole document:  band={whole['band']}  "
+            f"sent_len={whole['mean_sentence_len']}  "
+            f"rare%={whole['rare_word_pct']}  "
+            f"subj%={whole['subjunctive_ratio']}  "
+            f"({whole['n_words']} words)"
+        )
+        ft, lt = assessment["first_third"], assessment["last_third"]
+        lines.append(f"First third:     band={ft['band']}  "
+                     f"sent_len={ft['mean_sentence_len']}")
+        lines.append(f"Last third:      band={lt['band']}  "
+                     f"sent_len={lt['mean_sentence_len']}")
+        if ft["band"] != lt["band"]:
+            lines.append(f"⚠️  Drift: level shifts {ft['band']} → {lt['band']} "
+                         "between first and last third.")
+    judge = assessment["judge"]
+    if judge:
+        lines.append(f"LLM judge:       {judge['verdict']}")
+        if judge["raw"]:
+            lines.append(f"  ↳ {judge['raw'].splitlines()[0]}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    from settings import OLLAMA_TIMEOUT
+
+    parser = argparse.ArgumentParser(
+        description="Assess the CEFR level of a Spanish text file."
+    )
+    parser.add_argument("file", help="Path to a .txt file to assess.")
+    parser.add_argument("--level", default="B2",
+                        help="Target CEFR level (default B2).")
+    parser.add_argument("--model", default=None,
+                        help="Ollama model for the LLM-judge. Omit to skip it.")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="Skip the LLM-judge; run the profiler only.")
+    parser.add_argument("--timeout", type=int, default=OLLAMA_TIMEOUT,
+                        help="Ollama call timeout in seconds.")
+    args = parser.parse_args(argv)
+
+    with open(args.file, encoding="utf-8") as fh:
+        text = fh.read()
+    assessment = assess_document(
+        text, args.level, model=args.model, timeout=args.timeout,
+        run_llm=not args.no_llm,
+    )
+    print(format_report(assessment, args.level))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

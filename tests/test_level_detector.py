@@ -87,3 +87,34 @@ class TestJudge:
         with patch("httpx.Client", side_effect=RuntimeError("boom")):
             result = level_detector.judge_level("texto", "B2", "fakemodel")
         assert result["verdict"] == "?"
+
+
+class TestAssessAndReport:
+    def test_thirds_split_and_report(self, monkeypatch):
+        # Stub profile_text so we don't need the real model here.
+        monkeypatch.setattr(
+            level_detector, "PROFILER_AVAILABLE", True
+        )
+        monkeypatch.setattr(
+            level_detector, "profile_text",
+            lambda t: {"mean_sentence_len": 10.0, "rare_word_pct": 4.0,
+                       "subjunctive_ratio": 0.0, "band": "B1", "n_words": len(t.split())},
+        )
+        text = " ".join(["palabra"] * 300)
+        result = level_detector.assess_document(
+            text, "B1", model=None, run_llm=False
+        )
+        assert result["whole"]["band"] == "B1"
+        assert result["first_third"] is not None
+        assert result["last_third"] is not None
+        assert result["judge"] is None
+        report = level_detector.format_report(result, "B1")
+        assert "B1" in report
+        assert "last third" in report.lower()
+
+    def test_assess_without_profiler(self, monkeypatch):
+        monkeypatch.setattr(level_detector, "PROFILER_AVAILABLE", False)
+        result = level_detector.assess_document("hola", "B1", run_llm=False)
+        assert result["whole"] is None
+        report = level_detector.format_report(result, "B1")
+        assert "profiler unavailable" in report.lower()
