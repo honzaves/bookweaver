@@ -38,6 +38,7 @@ boundaries, processed independently, and rejoined.
 | `widgets.py` | All reusable Qt widgets | For new/changed widgets |
 | `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
 | `tts.py` | Kokoro TTS → MP3 audiobook with ID3 chapters; optional deps behind an import gate | For TTS/audio changes |
+| `level_detector.py` | Standalone CEFR level assessment (deterministic profiler + Ollama LLM-judge); optional deps behind an import gate | For level-detection changes |
 | `bookweaver.json` | All user-editable settings: colours, models, timeout, TTS voices | User edits; no code changes |
 
 ---
@@ -57,6 +58,10 @@ boundaries, processed independently, and rejoined.
    `mutagen`), all behind the `TTS_AVAILABLE` import gate; never Qt, never
    `app`/`worker`
    `settings` → nothing (stdlib only)
+   `level_detector` → optional profiler deps only (`spacy`, `wordfreq`,
+   `es_core_news_sm`), behind the `PROFILER_AVAILABLE` import gate, plus
+   `settings` (lazy, inside the CLI `main` only) and `httpx` (lazy, inside
+   `ollama_generate`); never Qt, never `app`/`worker`/`widgets`
    Never import `app` or `worker` from `widgets` or `settings`.
    `app.py` must not import `tts` — it checks Kokoro availability cheaply
    via `importlib.util.find_spec("kokoro")` to avoid loading torch at startup.
@@ -270,6 +275,57 @@ explicitly. This is intentional to prevent silent wrong values.
 
 Full translation mode generates more tokens than the summarise pipeline and
 may require a higher timeout, especially for large chapters.
+
+---
+
+## Language-level detector
+
+`level_detector.py` is a Qt-free, standalone module (currently CLI-only)
+that assesses the CEFR level of a Spanish text via two independent assessors:
+
+- **Deterministic profiler** — `profile_text()` uses spaCy + wordfreq to
+  compute mean sentence length, rare-word % (Zipf < 3.5 on surface forms),
+  and subjunctive ratio, then maps them to a band (B1/B2/C1/C2) via
+  `band_from_metrics()` / `CEFR_THRESHOLDS`. `assess_document()` also
+  profiles the first and last thirds and flags drift between them.
+- **Ollama LLM-judge** — `judge_level()` sends `build_judge_prompt()` to the
+  local Ollama instance at temperature 0 via `ollama_generate()` (a
+  standalone twin of `worker._ollama_call`, so the CLI never touches the
+  QThread worker). Any error degrades gracefully to verdict `"?"` — it
+  never raises.
+
+**Gated dependencies:** the profiler deps (`spacy`, `wordfreq`,
+`es_core_news_sm`) sit behind a `PROFILER_AVAILABLE` import gate (with
+`PROFILER_IMPORT_ERROR` holding the reason when absent). The module imports
+and the LLM-judge work without them. Install with uv only:
+
+```bash
+uv pip install spacy wordfreq
+# The Spanish model must be installed as a pinned wheel whose version matches
+# the installed spaCy major.minor (check: python -c "import spacy; print(spacy.__version__)").
+# NEVER use `python -m spacy download` — it does not respect the uv venv.
+uv pip install \
+  "https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.8.0/es_core_news_sm-3.8.0-py3-none-any.whl"
+```
+
+**CLI:**
+
+```bash
+python level_detector.py output_ES_B1.txt --level B1 --no-llm          # profiler only
+python level_detector.py output_ES_B1.txt --level B1 --model gemma3:27b # + LLM judge
+```
+
+Flags: `--level` (target CEFR level, default `B2`), `--model` (Ollama model
+for the judge; omit to skip it), `--no-llm` (profiler only), `--timeout`
+(Ollama timeout in seconds, default `OLLAMA_TIMEOUT`). When the profiler
+deps are missing, the report says so and the judge still runs.
+
+`_load_nlp()` deliberately excludes the parser, NER, and lemmatizer
+(memory: the parser costs on the order of 1 GB per 100k chars) and uses the
+rule-based sentencizer; the morphologizer stays because it supplies the
+`Mood=Sub` feature. Frequency is looked up on surface forms, so
+`rare_word_pct` runs a little hot on inflected Spanish — an accepted,
+tunable approximation.
 
 ---
 
