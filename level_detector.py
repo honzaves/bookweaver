@@ -24,3 +24,33 @@ try:
     PROFILER_AVAILABLE = True
 except ImportError as exc:  # pragma: no cover - exercised via stubs
     PROFILER_IMPORT_ERROR = str(exc)
+
+
+# ──────────────────────────────────────────────────────────────
+#  DETERMINISTIC BANDING  (starting thresholds — tunable)
+# ──────────────────────────────────────────────────────────────
+# Each row is the UPPER bound for that band on every axis. A text is
+# placed in the LOWEST band whose every axis is within bounds; if it
+# exceeds B1/B2/C1 on any axis it spills up. The most-advanced axis wins,
+# which is why subjunctive use alone lifts an otherwise-simple text.
+CEFR_THRESHOLDS: list[tuple[str, float, float, float]] = [
+    # band, max_sentence_len, max_rare_pct, max_subjunctive_ratio
+    ("B1", 12.0, 5.0, 1.0),
+    ("B2", 18.0, 10.0, 3.0),
+    ("C1", 25.0, 18.0, 100.0),
+]
+
+
+def band_from_metrics(metrics: dict) -> str:
+    """Map a feature-metrics dict to a CEFR band B1/B2/C1/C2.
+
+    metrics keys: mean_sentence_len, rare_word_pct, subjunctive_ratio.
+    Thresholds are deliberately conservative starting points; tune against
+    real graded output."""
+    sent = metrics["mean_sentence_len"]
+    rare = metrics["rare_word_pct"]
+    subj = metrics["subjunctive_ratio"]
+    for band, max_sent, max_rare, max_subj in CEFR_THRESHOLDS:
+        if sent <= max_sent and rare <= max_rare and subj <= max_subj:
+            return band
+    return "C2"
