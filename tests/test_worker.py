@@ -648,3 +648,30 @@ class TestCarryContext:
     def test_both_includes_names_and_prose(self):
         block = self.call("both", "Alice and Alice again.", "prior tail here", False)
         assert "Alice" in block and "prior tail here" in block
+
+
+class TestLevelCheck:
+    def _worker(self):
+        w = ProcessingWorker.__new__(ProcessingWorker)  # bypass QThread init
+        w.log = MagicMock()
+        w._timeout = 1200
+        return w
+
+    def test_level_check_logs_report(self):
+        w = self._worker()
+        results = [("Capítulo 1", "Hola mundo."), ("Capítulo 2", "Adiós.")]
+        with patch("level_detector.assess_document",
+                   return_value={"whole": None, "first_third": None,
+                                 "last_third": None, "judge": None}) as ad, \
+             patch("level_detector.format_report", return_value="REPORT"):
+            w._run_level_check(results, "B1", "fakemodel")
+        ad.assert_called_once()
+        # the report text reached the log
+        logged = " ".join(str(c.args[0]) for c in w.log.emit.call_args_list)
+        assert "REPORT" in logged
+
+    def test_level_check_never_raises(self):
+        w = self._worker()
+        with patch("level_detector.assess_document",
+                   side_effect=RuntimeError("boom")):
+            w._run_level_check([("t", "b")], "B1", "fakemodel")  # must not raise

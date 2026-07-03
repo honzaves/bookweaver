@@ -452,7 +452,51 @@ class ProcessingWorker(QThread):
         if cfg.get("generate_mp3") and "txt" in out_formats:
             self._generate_mp3(results, out_folder, stem, level, meta, cfg)
 
+        # ── end-of-book language-level report (log-only, Spanish output only) ──
+        # Runs for both "report" and "validate"; "validate" additionally
+        # regenerated chunks inline during the loop (Task 10).
+        if cfg.get("level_check") in ("report", "validate"):
+            output_is_english = mode == "summarise_only" or (
+                mode == "summarise_key_ideas" and summary_lang == "en"
+            )
+            if output_is_english:
+                self.log.emit(
+                    "🔎  Level check skipped — it is Spanish-only and this "
+                    "output is English.",
+                    "muted",
+                )
+            else:
+                self._run_level_check(results, level, model)
+
         self.finished.emit(True, ", ".join(str(p) for p in out_paths))
+
+    # ── post-run language-level check (optional, log-only) ────
+    def _run_level_check(
+        self,
+        results: list[tuple[str, str]],
+        target_level: str,
+        model: str,
+    ) -> None:
+        """Assess the assembled output's CEFR level and log a report.
+        Never raises — a failure here must not undo written output."""
+        try:
+            import level_detector
+        except ImportError as exc:
+            self.log.emit(f"Level check skipped (import failed: {exc}).", "warning")
+            return
+        body = "\n\n".join(body for _, body in results)
+        self.log.emit("\n🔎  Assessing output language level…", "info")
+        try:
+            assessment = level_detector.assess_document(
+                body, target_level, model=model, timeout=self._timeout,
+                run_llm=True,
+            )
+            for line in level_detector.format_report(
+                assessment, target_level
+            ).splitlines():
+                self.log.emit(f"   {line}", "muted")
+        except Exception as exc:
+            self.log.emit(f"Level check failed: {exc}", "warning")
 
     # ── MP3 audiobook ─────────────────────────────────────────
     def _generate_mp3(
