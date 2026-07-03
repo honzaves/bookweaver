@@ -352,7 +352,12 @@ class BookWeaverApp(QMainWindow):
         self._level_off_radio = QRadioButton("Off")
         self._level_report_radio = QRadioButton("Report level at end of book")
         self._level_validate_radio = QRadioButton(
-            "Validate each chunk (regenerate if 2+ levels too hard) + report"
+            "Validate each chunk — experimental, unreliable (regenerate if "
+            "2+ levels too hard) + report"
+        )
+        self._level_validate_radio.setToolTip(
+            "Per-chunk CEFR gating is a proxy and often misfires; leave Off "
+            "unless experimenting. Off is the default."
         )
         self._level_off_radio.setChecked(True)
         for rb in (self._level_off_radio, self._level_report_radio,
