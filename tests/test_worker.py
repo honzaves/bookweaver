@@ -675,3 +675,81 @@ class TestLevelCheck:
         with patch("level_detector.assess_document",
                    side_effect=RuntimeError("boom")):
             w._run_level_check([("t", "b")], "B1", "fakemodel")  # must not raise
+
+
+class TestValidatedChunk:
+    def _worker(self):
+        w = ProcessingWorker.__new__(ProcessingWorker)  # bypass QThread init
+        w.log = MagicMock()
+        w._timeout = 1200
+        w._abort = False
+        return w
+
+    def test_accepts_when_within_range(self):
+        w = self._worker()
+        w._ollama_call = MagicMock(return_value="texto bueno")
+        with patch("level_detector.PROFILER_AVAILABLE", True), \
+             patch("level_detector.profile_text",
+                   return_value={"band": "B2", "n_words": 500}):
+            out = w._generate_validated_chunk(
+                "m", lambda note: f"PROMPT[{note}]", "B1", "lbl", 0.4
+            )
+        assert out == "texto bueno"
+        w._ollama_call.assert_called_once()  # no regeneration (B2 vs B1 = 1)
+
+    def test_regenerates_when_two_above(self):
+        w = self._worker()
+        w._ollama_call = MagicMock(side_effect=["c1 hard", "b1 easy"])
+        with patch("level_detector.PROFILER_AVAILABLE", True), \
+             patch("level_detector.profile_text",
+                   side_effect=[{"band": "C1", "n_words": 500},
+                                {"band": "B1", "n_words": 500}]):
+            out = w._generate_validated_chunk(
+                "m", lambda note: f"PROMPT[{note}]", "B1", "lbl", 0.4
+            )
+        assert out == "b1 easy"
+        assert w._ollama_call.call_count == 2
+        # second call's prompt carried a non-empty simplify note
+        assert "PROMPT[]" not in w._ollama_call.call_args_list[1].args[1]
+
+    def test_caps_retries_and_keeps_last(self):
+        w = self._worker()
+        w._ollama_call = MagicMock(side_effect=["a", "b", "c"])
+        with patch("level_detector.PROFILER_AVAILABLE", True), \
+             patch("level_detector.profile_text",
+                   return_value={"band": "C2", "n_words": 500}):
+            out = w._generate_validated_chunk(
+                "m", lambda note: "P", "B1", "lbl", 0.4, max_retries=2
+            )
+        assert out == "c"                       # last attempt kept
+        assert w._ollama_call.call_count == 3   # 1 + 2 retries
+
+    def test_skips_gate_when_profiler_absent(self):
+        w = self._worker()
+        w._ollama_call = MagicMock(return_value="whatever")
+        with patch("level_detector.PROFILER_AVAILABLE", False):
+            out = w._generate_validated_chunk(
+                "m", lambda note: "P", "B1", "lbl", 0.4
+            )
+        assert out == "whatever"
+        w._ollama_call.assert_called_once()
+
+    def test_skips_gate_for_short_chunk(self):
+        w = self._worker()
+        w._ollama_call = MagicMock(return_value="tiny")
+        with patch("level_detector.PROFILER_AVAILABLE", True), \
+             patch("level_detector.profile_text",
+                   return_value={"band": "C2", "n_words": 40}):
+            out = w._generate_validated_chunk(
+                "m", lambda note: "P", "B1", "lbl", 0.4, min_words=150
+            )
+        assert out == "tiny"
+        w._ollama_call.assert_called_once()     # no regeneration on a tiny chunk
+
+    def test_returns_none_on_call_failure(self):
+        w = self._worker()
+        w._ollama_call = MagicMock(return_value=None)
+        out = w._generate_validated_chunk(
+            "m", lambda note: "P", "B1", "lbl", 0.4
+        )
+        assert out is None
