@@ -45,6 +45,49 @@ _LEVEL_GUIDANCE: dict[str, str] = {
 
 
 # ──────────────────────────────────────────────────────────────
+#  LEVEL SIMPLIFICATION EXAMPLES
+# ──────────────────────────────────────────────────────────────
+# Before/after simplification pairs. Only B1/B2 need active correction;
+# C1/C2 rely on constraints (leaving their prompts byte-stable). Pairs carry
+# no narrative, so nothing content-like can bleed into the output.
+_LEVEL_PAIRS: dict[str, list[tuple[str, str]]] = {
+    "B1": [
+        ("A pesar de las inclemencias del tiempo, decidieron proseguir su "
+         "travesía.",
+         "Aunque hacía mal tiempo, decidieron seguir su viaje."),
+        ("Se hallaba sumido en una profunda melancolía cuya causa desconocía.",
+         "Estaba muy triste y no sabía por qué."),
+    ],
+    "B2": [
+        ("Se hallaba sumido en una profunda melancolía cuya causa se le "
+         "escapaba.",
+         "Estaba muy triste, aunque no entendía del todo por qué se sentía "
+         "así."),
+        ("Perseveró, no obstante las adversidades que se cernían sobre él.",
+         "Siguió adelante, a pesar de los problemas que tenía por delante."),
+    ],
+}
+
+
+def _pairs_block(level: str) -> str:
+    """Render before/after example pairs for *level* as a delimited reference
+    block with a hard bleed separator. Empty string for levels without pairs,
+    keeping their prompt output byte-identical."""
+    pairs = _LEVEL_PAIRS.get(level)
+    if not pairs:
+        return ""
+    lines = "\n".join(
+        f"- Instead of: «{hard}»\n  Write: «{easy}»" for hard, easy in pairs
+    )
+    return (
+        "LEVEL EXAMPLES (style/difficulty reference ONLY — do NOT translate, "
+        "copy, or reuse their words or content):\n"
+        f"{lines}\n\n"
+        "USE ONLY THE ACTUAL SOURCE BELOW.\n\n"
+    )
+
+
+# ──────────────────────────────────────────────────────────────
 #  CREATIVITY GUIDANCE  (maps 1–10 to prose instructions)
 # ──────────────────────────────────────────────────────────────
 def _creativity_instruction(level: int) -> str:
@@ -207,8 +250,10 @@ def build_translation_prompt(
         f"- Do NOT use vocabulary, grammar, or constructions beyond CEFR {level} — "
         "stay within the target level throughout.\n"
         f"- This is chapter {chapter_index + 1}.\n\n"
-        f"REMINDER — you are writing for a CEFR {level} reader. Apply the language guidance strictly.\n\n"
+        f"REMINDER — you are writing for a CEFR {level} reader. "
+        "Apply the language guidance strictly.\n\n"
         f"{context_block}"
+        f"{_pairs_block(level)}"
         f"SOURCE TEXT (English):\n{chunk_text}\n"
     )
 
@@ -247,6 +292,7 @@ def build_rewrite_prompt(
         "- Make it feel like a real book chapter, not a summary.\n"
         f"- This is chapter {chapter_index + 1}.\n\n"
         f"{context_block}"
+        f"{_pairs_block(level)}"
         f"SOURCE SUMMARY (English):\n{summary}\n"
     )
 

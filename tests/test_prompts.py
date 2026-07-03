@@ -383,3 +383,21 @@ class TestSimplifyNote:
         a = prompts.build_translation_prompt("texto", "B1", 0, 5)
         b = prompts.build_translation_prompt("texto", "B1", 0, 5, simplify_note="")
         assert a == b
+
+
+# ──────────────────────────────────────────────────────────────
+#  _pairs_block  +  pairs injection into prompts
+# ──────────────────────────────────────────────────────────────
+class TestPairsBlock:
+    def test_b1_translation_includes_example_pairs(self):
+        p = build_translation_prompt("Hello.", level="B1", chapter_index=0)
+        assert "LEVEL EXAMPLES" in p
+        assert "Instead of" in p and "Write:" in p
+
+    def test_c1_translation_has_no_example_block(self):
+        p = build_translation_prompt("Hello.", level="C1", chapter_index=0)
+        assert "LEVEL EXAMPLES" not in p
+
+    def test_b1_rewrite_includes_bleed_separator(self):
+        p = build_rewrite_prompt("Summary.", level="B1", chapter_index=0)
+        assert "USE ONLY THE ACTUAL SOURCE" in p
