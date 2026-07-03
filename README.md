@@ -1,7 +1,7 @@
 # BookWeaver
 
 **BookWeaver** is a desktop app that takes an English EPUB and processes it
-via a local [Ollama](https://ollama.com) model. Three processing modes are
+via a local [Ollama](https://ollama.com) model. Four processing modes are
 available:
 
 - **Summarise → Rewrite** — condenses each chapter to a chosen length, then
@@ -13,9 +13,15 @@ available:
 - **Summarise only** — condenses each chapter to the target length and saves
   the result as English text. Good for producing abridged English versions or
   quickly reviewing a book's content.
+- **Summary with key ideas** — condenses each chapter (English, or Spanish at
+  the chosen CEFR level), then appends 1–5 key ideas per chapter; if ≥2
+  chapters are processed, a book-wide "Key ideas of the book" synthesis is
+  added at the end. Output language is chosen per run.
 
 All modes use the same creativity and CEFR-level controls, and all support
-chapter chunking, resume-after-failure, and all output formats.
+chapter chunking, resume-after-failure, and all output formats. An optional
+MP3 audiobook (Kokoro TTS) and a Spanish language-level check are available on
+top.
 
 ---
 
@@ -26,16 +32,19 @@ chapter chunking, resume-after-failure, and all output formats.
 | EPUB source | File picker filtered to `.epub` files |
 | Model selection | Dropdown loaded from `bookweaver.json` — no code changes to add models |
 | CEFR levels | B1 · B2 · C1 · C2 |
-| Processing mode | **Summarise → Rewrite**, **Full translation**, or **Summarise only** (English, no translation) |
-| Condensation slider | Keep 10–90 % of each chapter; visible in Summarise → Rewrite and Summarise only modes |
+| Processing mode | **Summarise → Rewrite**, **Full translation**, **Summarise only** (English, no translation), or **Summary with key ideas** |
+| Chapter selection | Scrollable checklist of every chapter with a tri-state "Select all"; process any subset (≥1 required) |
+| Condensation slider | Keep 10–90 % of each chapter; visible in every mode except Full translation |
 | Creativity slider | 1–10 scale controlling LLM elaboration freedom and Ollama temperature |
 | Chapter chunking | Long chapters are split at paragraph boundaries into configurable-size chunks, processed independently, then rejoined |
 | Chunk size | Configurable in the UI (200–10 000 words; default 2 000) |
+| Cross-chunk continuity | Optional carry between chunks: protect proper nouns, carry a prose tail, or both (scene-break aware) |
 | Output format | Plain text (`.txt`), EPUB (`.epub`), and/or HTML (`.html`) — select one or more |
+| MP3 audiobook | Optional Kokoro TTS output with ID3 chapter markers (requires `.txt` and the optional install) |
+| Language-level check | Off · Report the finished book's CEFR level · Validate each chunk and regenerate when 2+ bands too hard (needs spaCy) |
 | EPUB metadata | Title, Author, Language, Contributor — pre-filled from source file |
 | Output folder | Configurable; defaults to the same folder as the source file |
 | Proper noun rule | Character and place names are never translated |
-| First-chapter mode | Process only chapter 1 for fast prompt testing |
 | Timeout | Configurable per-run in the UI; default set in `bookweaver.json` |
 | Resume | After a timeout or failure, resume from the failed chapter with one click |
 | Abort | Cleanly stops after the current Ollama call |
@@ -90,20 +99,27 @@ python main.py
 
 ```
 bookweaver/
-├── main.py              Entry point — creates QApplication and main window
-├── app.py               BookWeaverApp (QMainWindow) — all UI wiring
-├── worker.py            ProcessingWorker (QThread) — pipeline logic
-├── prompts.py           LLM prompt builders
-├── widgets.py           Reusable custom Qt widgets
-├── settings.py          Config loader — reads bookweaver.json, builds stylesheet
-├── bookweaver.json      All user-editable settings: colours, models, timeout
-├── pyproject.toml       Project metadata and tool config
-├── requirements.txt     Runtime dependencies
-├── requirements-dev.txt Dev/test dependencies
+├── main.py               Entry point — creates QApplication and main window
+├── app.py                BookWeaverApp (QMainWindow) — all UI wiring
+├── worker.py             ProcessingWorker (QThread) — pipeline logic
+├── epub_io.py            EPUB → ordered Chapter list (titles, scene breaks)
+├── prompts.py            LLM prompt builders
+├── widgets.py            Reusable custom Qt widgets
+├── settings.py           Config loader — reads bookweaver.json, builds stylesheet
+├── tts.py                Kokoro TTS → MP3 audiobook (optional deps, import-gated)
+├── level_detector.py     Standalone CEFR level assessment (profiler + LLM judge)
+├── bookweaver.json       All user-editable settings: colours, models, timeout, voices
+├── pyproject.toml        Project metadata and tool config
+├── requirements.txt      Runtime dependencies
+├── requirements-dev.txt  Dev/test dependencies
+├── requirements-tts.txt  Optional Kokoro TTS dependencies
 └── tests/
-    ├── conftest.py      PyQt6 stubs so tests run without Qt installed
+    ├── conftest.py       PyQt6 (and optional-TTS) stubs so tests run without Qt
+    ├── test_epub_io.py
+    ├── test_level_detector.py
     ├── test_prompts.py
     ├── test_settings.py
+    ├── test_tts.py
     └── test_worker.py
 ```
 
@@ -145,12 +161,16 @@ sent to the LLM:
 
 | Function | Used by |
 |---|---|
-| `build_summary_prompt` | Summarise → Rewrite (step 1) and Summarise only |
-| `build_rewrite_prompt` | Summarise → Rewrite mode, step 2 |
+| `build_summary_prompt` | Summarise → Rewrite (step 1), Summarise only, and key-ideas |
+| `build_rewrite_prompt` | Summarise → Rewrite mode (step 2) and key-ideas (Spanish) |
 | `build_translation_prompt` | Full translation mode |
+| `build_key_ideas_prompt` | Summary with key ideas — per-chapter key ideas |
+| `build_book_key_ideas_prompt` | Summary with key ideas — book-wide synthesis |
+| `build_context_block` | Cross-chunk continuity block spliced into body calls |
+| `build_simplify_note` | Language-level "validate" — simplify override on regeneration |
 
 The CEFR level guidance and creativity tier descriptions are plain string
-constants — edit them directly and both modes will pick up the changes.
+constants — edit them directly and every mode will pick up the changes.
 
 ---
 
@@ -190,6 +210,17 @@ Each chapter chunk goes through a single LLM call:
 Good for: producing abridged English versions; skimming a long book before
 deciding to translate it; prompt development and testing.
 
+### Summary with key ideas
+
+Each chapter is condensed (one LLM call per chunk in English, or summarise +
+rewrite in Spanish at the chosen CEFR level), then a further call appends a
+localized **Key ideas / Ideas clave** section of 1–5 bullets, each with a
+≤2-sentence explanation. After the book, if ≥2 chapters were processed, a
+final book-wide **Key ideas of the book / Ideas clave del libro** synthesis is
+appended. The output language (English or Spanish) is chosen per run.
+
+Good for: study digests; capturing the through-line of a non-fiction book.
+
 ---
 
 ## Chapter chunking
@@ -204,6 +235,53 @@ The chunk size defaults to **2 000 words** and can be adjusted in the Options
 panel (200–10 000 words). Smaller chunks reduce per-call token usage and
 timeout risk; larger chunks give the LLM more context and can produce more
 coherent output for dense chapters.
+
+---
+
+## Cross-chunk continuity
+
+Long chapters are split into independent chunks, which can cause names and tone
+to drift across the seams. The **Cross-chunk continuity** dropdown offers four
+options:
+
+- **Off** (default) — chunks are processed with no shared context.
+- **Names only** — proper nouns found in each chunk's source are passed to the
+  model so their spelling stays consistent. Costs no extra LLM calls.
+- **Prose tail** — the last ~120 words of the previous chunk's Spanish output
+  are carried forward for smoother transitions; reset at scene breaks and
+  chapter starts.
+- **Both** — names plus prose tail.
+
+The prose-tail modes are scene-break aware: a chapter containing a `* * *`
+break is hard-segmented there, so a short single-chunk chapter with one break
+becomes two chunks. Scene separators are restored in the written output.
+
+---
+
+## Language-level check
+
+An optional check on the Spanish output, set via the **Language-level check**
+radio group:
+
+- **Off** (default).
+- **Report level at end of book** — after the run, the finished Spanish is
+  assessed (deterministic profiler + optional Ollama LLM-judge) and its CEFR
+  level is logged. Skipped for English output.
+- **Validate each chunk** — additionally, during the run each Spanish chunk is
+  profiled and regenerated (with a "simplify harder" instruction) while it
+  sits 2+ CEFR bands above the target level, up to two retries. Requires the
+  spaCy profiler; the option is disabled if spaCy is not installed.
+
+The assessor also lives in `level_detector.py` as a standalone CLI:
+
+```bash
+python level_detector.py output_ES_B1.txt --level B1 --no-llm          # profiler only
+python level_detector.py output_ES_B1.txt --level B1 --model gemma3:27b # + LLM judge
+```
+
+The profiler needs extra dependencies (`spacy`, `wordfreq`, and the
+`es_core_news_sm` model). Install them with **uv** — see the notes in
+[CLAUDE.md](CLAUDE.md#language-level-detector).
 
 ---
 
@@ -237,7 +315,7 @@ No Qt installation required — the test suite stubs out PyQt6.
 | Chunk size | 2 000 words    | Safe default for most models |
 | Model | `gemma4:31b-mxfp8`   | Fast on Apple Silicon, good Spanish quality |
 | Timeout | 900 s          | Enough for large chapters at moderate keep % |
-| First chapter only | ✅ on first run | Validate prompts cheaply before full run |
+| Chapters | Tick chapter 1 only on first run | Validate prompts cheaply before the full book |
 
 ### Full translation mode
 

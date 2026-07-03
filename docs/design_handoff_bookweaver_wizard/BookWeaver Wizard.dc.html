@@ -161,7 +161,7 @@
       <div class="step {{ r4 }}" onClick="{{ goS4 }}"><span class="n">{{ b4 }}</span>Run</div>
     </div>
     <sc-if value="{{ showRecap }}">
-      <div class="recap">Step 1 · <b>middlemarch.epub</b> · {{ totalCh }} chapters · Gemma 4 31B · B2 <a onClick="{{ goS1 }}">edit</a></div>
+      <div class="recap">Step 1 · <b>middlemarch.epub</b> · {{ recapTail }} <a onClick="{{ goS1 }}">edit</a></div>
     </sc-if>
 
     <!-- ===== STEP 1 · BOOK ===== -->
@@ -185,10 +185,7 @@
             </sc-for>
           </div>
         </div>
-        <div class="row">
-          <div class="gc" style="flex:1"><div class="gct">Ollama model</div><div class="field drop">Gemma 4 31B (recommended) <span class="cv">▾</span></div></div>
-          <div class="gc" style="flex:1"><div class="gct">Spanish level</div><div class="field drop">B2 — Vantage <span class="cv">▾</span></div></div>
-        </div>
+        <div class="gc"><div class="gct">Ollama model</div><div class="field drop">Gemma 4 31B (recommended) <span class="cv">▾</span></div></div>
       </div></div>
     </sc-if>
 
@@ -236,6 +233,21 @@
             <div class="leg" style="margin-top:6px">🟢 5–6 adds vivid prose without inventing plot</div>
           </div>
         </div>
+        <sc-if value="{{ targetSpanish }}">
+          <div class="gc">
+            <div class="gct">Spanish level</div>
+            <div class="field drop" style="max-width:280px">B2 — Vantage <span class="cv">▾</span></div>
+            <div class="leg" style="margin-top:8px">Target CEFR level for the rewritten Spanish · B1 · B2 · C1 · C2</div>
+          </div>
+          <div class="gc">
+            <div class="gct">Spanish level check <span class="meta">target: B2 — Vantage</span></div>
+            <div class="row" style="gap:10px">
+              <div class="tile {{ lcOff }}" style="flex:1" onClick="{{ setLcOff }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Off</span></div><div class="td">no level checking</div></div>
+              <div class="tile {{ lcEnd }}" style="flex:1" onClick="{{ setLcEnd }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Report at end</span></div><div class="td">analyse the finished book and report its CEFR level</div></div>
+              <div class="tile {{ lcChunk }}" style="flex:1" onClick="{{ setLcChunk }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Validate each chunk</span></div><div class="td">re-check every chunk against B2, retry on drift — slower</div></div>
+            </div>
+          </div>
+        </sc-if>
       </div></div>
     </sc-if>
 
@@ -321,6 +333,7 @@ class Component extends DCLogic {
     step: 1,
     mode: 'sr',              // sr | full | sum | key
     keyLang: 'es',
+    levelCheck: 'off',       // off | end | chunk
     keep: 40,
     creativity: 5,
     formats: { txt: true, epub: true, html: false },
@@ -370,6 +383,7 @@ class Component extends DCLogic {
 
   renderVals(){
     const s=this.state, step=s.step;
+    const targetSpanish = s.mode==='sr' || s.mode==='full' || (s.mode==='key' && s.keyLang==='es');
     const railCls=n=> step===n?'act':(step>n?'done':'');
     const badge=n=> step>n?'✓':String(n);
 
@@ -411,6 +425,10 @@ class Component extends DCLogic {
       b1:badge(1),b2:badge(2),b3:badge(3),b4:badge(4),
       goS1:()=>this.go(1),goS2:()=>this.go(2),goS3:()=>this.go(3),goS4:()=>this.go(4),
       showRecap: step>1, totalCh: s.chapters.length,
+      targetSpanish,
+      recapTail: s.chapters.length+' chapters · Gemma 4 31B'+(targetSpanish?' · B2':''),
+      lcOff:s.levelCheck==='off'?'sel':'', lcEnd:s.levelCheck==='end'?'sel':'', lcChunk:s.levelCheck==='chunk'?'sel':'',
+      setLcOff:()=>this.set({levelCheck:'off'}), setLcEnd:()=>this.set({levelCheck:'end'}), setLcChunk:()=>this.set({levelCheck:'chunk'}),
       isS1:step===1,isS2:step===2,isS3:step===3,isS4:step===4,
 
       // chapters

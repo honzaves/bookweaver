@@ -151,6 +151,25 @@ amber `–` glyph; disabled = dim.
 
 ---
 
+## Target language (derived) — gates several controls
+Several controls only make sense when the **output is Spanish**. There is no
+explicit "target language" picker; it is **derived from the mode** (and the
+key-ideas toggle):
+
+```
+targetIsSpanish = mode === 'summariseRewrite'
+              ||  mode === 'fullTranslation'
+              || (mode === 'keyIdeas' && keyIdeasLanguage === 'es')
+// 'summariseOnly' (English) → false
+```
+
+When `targetIsSpanish` is **false**, hide the **Spanish level** dropdown and the
+**Spanish level check** (both in step 2), and drop the level from the recap line.
+When it flips back to true, restore them. The default mode is Spanish, so both are
+visible on a fresh start.
+
+---
+
 ## Screens / Views
 
 ### Step 1 — Book  (`screenshots/01-step1-book.png`)
@@ -164,9 +183,9 @@ amber `–` glyph; disabled = dim.
   `#0f0f0c`, radius `8px`). Each row: checkbox + zero-padded monospace number
   (`01.`) + title; row hover `#181812`. All checked by default; ≥1 required to
   start.
-- **Model** + **Spanish level** cards in a `2-col` row: dropdown fields
-  ("Gemma 4 31B (recommended)" ▾ ; "B2 — Vantage" ▾). Levels: `B1 — Threshold`,
-  `B2 — Vantage` (default), `C1 — Advanced`, `C2 — Mastery`.
+- **Ollama model** card (full width): dropdown "Gemma 4 31B (recommended)" ▾.
+  *(The Spanish level dropdown used to sit here — it now lives in step 2, since it
+  depends on the mode chosen there; see Step 2.)*
 
 ### Step 2 — Transform  (`02-step2-transform.png`, `03-…full-translation.png`, `04-…key-ideas.png`)
 **Purpose:** the heart of the app — choose the mode and tune the two sliders.
@@ -188,7 +207,28 @@ amber `–` glyph; disabled = dim.
   - **Summarise only** → info note about English-only output.
   - **Summary + key ideas** → a **"Key-ideas output language"** card with two
     tiles: *Spanish (at B2)* / *English*. Note: "Changing this re-populates the
-    MP3 voice list in step 3." (And it must actually re-populate it.)
+    MP3 voice list in step 3." (And it must actually re-populate it.) Because this
+    toggle can flip `targetIsSpanish`, it also drives the Spanish-only cards below.
+- **Spanish level** dropdown card — **shown only when `targetIsSpanish`**, placed
+  directly **above** the Spanish level check. Dropdown (`max-width 280px`)
+  "B2 — Vantage" ▾; levels `B1 — Threshold`, `B2 — Vantage` (default),
+  `C1 — Advanced`, `C2 — Mastery`. Helper: "Target CEFR level for the rewritten
+  Spanish." *(Lives here rather than step 1 because it only applies when the mode
+  produces Spanish output — a step-1 control can't depend on a step-2 choice.)*
+- **Spanish level check** card (`screenshots/04b-step2-spanish-level-check.png`)
+  — **shown only when `targetIsSpanish`**, directly below the Spanish level
+  dropdown. Title
+  row: `SPANISH LEVEL CHECK` + right-aligned meta `target: B2 — Vantage` (mirrors
+  the chosen CEFR level). A **3-across row of selectable tiles** (same tile styling
+  as the mode selector; single-select radio behavior), default **Off**:
+  1. **Off** *(default)* — "no level checking"
+  2. **Report at end** — "analyse the finished book and report its CEFR level"
+     (runs one CEFR assessment at completion; surfaces the detected level in the
+     run log / summary).
+  3. **Validate each chunk** — "re-check every chunk against B2, retry on drift —
+     slower" (validates each generated chunk against the target level and
+     regenerates chunks that drift off-level; increases run time).
+  State: `spanishLevelCheck` = `off | end | chunk`.
 
 **The two sliders — preserve exactly (brief §5):**
 - *Track* `6px`, radius `99px`, `#2a2b24`, with faint tick marks; *knob* `17px`
@@ -284,6 +324,9 @@ State variables (see brief §5/§7 for full semantics):
 - `model`, `cefrLevel` (default B2)
 - `mode` (sr | full | sum | key; default sr)
 - `keyIdeasLanguage` (es|en) — only meaningful in `key` mode; drives voice list
+- **`targetIsSpanish`** (derived, see "Target language") — gates the step-2
+  Spanish level dropdown, the Spanish level check, and the recap level
+- `spanishLevelCheck` (off | end | chunk; default off) — only when targetIsSpanish
 - `keepPct` (10–90, default 40), `creativity` (1–10, default 5)
 - `formats {txt:true, epub:false, html:false}`, `mp3Enabled`, `mp3Available`,
   `voice`, `voiceList[]` (language-dependent)
@@ -318,6 +361,7 @@ non-essential.
   - `02-step2-transform.png` — Step 2, Summarise → rewrite (both sliders)
   - `03-step2-full-translation.png` — Step 2 with depth collapsed + translate note
   - `04-step2-key-ideas.png` — Step 2 with key-ideas language toggle revealed
+  - `04b-step2-spanish-level-check.png` — Step 2 Spanish level check card (shown when target is Spanish)
   - `05-step3-output.png` — Step 3 (Output) default
   - `06-step3-output-advanced.png` — Step 3 with MP3 enabled + Voice revealed
   - `07-step4-run-idle.png` — Run console, idle
