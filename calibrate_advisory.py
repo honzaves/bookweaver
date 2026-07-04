@@ -1,7 +1,9 @@
 """calibrate_advisory.py — offline CEFR readability calibration.
 
 Fits Fernández-Huerta ease-score thresholds against CEFR-labeled Spanish text
-(UniversalCEFR for A1-B2, Cervantes for C1-C2) and emits cefr_cuts.json.
+and emits cefr_cuts.json. UniversalCEFR/cefr_sp_en covers A1–C1 (no open C2
+data; Instituto Cervantes C1–C2 material is all-rights-reserved); the C2 cut
+is an extrapolated heuristic — see docs/superpowers/notes/2026-07-03-cervantes-corpus-spike.md.
 Run once, offline. Not imported by the app at runtime — only the emitted
 cefr_cuts.json is consumed (see level_detector.readability_band)."""
 from __future__ import annotations

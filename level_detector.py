@@ -281,7 +281,8 @@ def assess_document(
         out["last_third"] = profile_text(_third(words, "last"))
     if run_llm and model:
         out["judge"] = judge_level(text, target_level, model, timeout)
-    out["calibrated_band"] = document_band(text, load_cuts())
+    cuts = load_cuts()
+    out["calibrated_band"] = readability_band(text, cuts) if cuts is not None else None
     return out
 
 

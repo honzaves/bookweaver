@@ -63,10 +63,10 @@ raw number to a calibrated band without reworking earlier phases.
 - **Spike first:** can Instituto Cervantes C1–C2 material be obtained/licensed
   for labels? If not, fall back to (a) LLM-judge labels on a sample, or (b)
   leaving C1/C2 cut points as raw-ease heuristics with a documented caveat.
-- `calibrate_advisory.py` (offline, one-shot): load UniversalCEFR (A1–B2) +
-  Cervantes (C1–C2), score with `fernandez_huerta`, fit cut points
-  (median-crossover or ordinal logistic), **print a held-out confusion
-  matrix**, and emit `cefr_cuts.json`.
+- `calibrate_advisory.py` (offline, one-shot): load UniversalCEFR (A1–C1; no open C2 data) +
+  Cervantes (C1–C2, not openly licensed — see spike note), score with `fernandez_huerta`,
+  fit cut points (median-crossover or ordinal logistic), **print a held-out confusion
+  matrix**, and emit `cefr_cuts.json`. The C2 cut is an extrapolated heuristic.
 
 ### Phase 4 — Wire calibrated bands in (`level_detector.py`)
 

@@ -119,6 +119,49 @@ class TestAssessAndReport:
         report = level_detector.format_report(result, "B1")
         assert "profiler unavailable" in report.lower()
 
+    def test_calibrated_band_is_none_when_no_cuts_file(self, monkeypatch):
+        """assess_document must NOT label the profiler band as calibrated.
+
+        When load_cuts() returns None (no cefr_cuts.json / textstat absent),
+        calibrated_band must be None so format_report never prints the
+        misleading 'readability-based, primary' line."""
+        monkeypatch.setattr(level_detector, "load_cuts", lambda: None)
+        monkeypatch.setattr(level_detector, "PROFILER_AVAILABLE", True)
+        monkeypatch.setattr(
+            level_detector, "profile_text",
+            lambda t: {"mean_sentence_len": 10.0, "rare_word_pct": 4.0,
+                       "subjunctive_ratio": 0.0, "band": "B1",
+                       "n_words": len(t.split())},
+        )
+        result = level_detector.assess_document(
+            " ".join(["palabra"] * 50), "B1", run_llm=False
+        )
+        assert result["calibrated_band"] is None, (
+            "calibrated_band should be None when no cuts file is present; "
+            f"got {result['calibrated_band']!r}"
+        )
+        report = level_detector.format_report(result, "B1")
+        assert "Calibrated band" not in report, (
+            "format_report must not print 'Calibrated band' when calibrated_band is None"
+        )
+
+    def test_calibrated_band_set_from_readability(self, monkeypatch):
+        """assess_document exposes calibrated_band when readability_band succeeds."""
+        fake_cuts = {"formula": "fernandez_huerta",
+                     "thresholds": [[60.0, "C1"]], "above": "B2"}
+        monkeypatch.setattr(level_detector, "load_cuts", lambda: fake_cuts)
+        monkeypatch.setattr(level_detector, "readability_band",
+                            lambda t, c: "B2")
+        monkeypatch.setattr(level_detector, "PROFILER_AVAILABLE", False)
+        result = level_detector.assess_document("hola", "B1", run_llm=False)
+        assert result["calibrated_band"] == "B2", (
+            f"expected 'B2', got {result['calibrated_band']!r}"
+        )
+        report = level_detector.format_report(result, "B1")
+        assert "Calibrated band: B2" in report, (
+            "format_report must include 'Calibrated band: B2' when calibrated_band is set"
+        )
+
 
 class TestBandDistance:
     def test_one_above_is_distance_one(self):
