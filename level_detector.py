@@ -182,6 +182,20 @@ def readability_band(text: str, cuts: dict) -> str | None:
     return cuts["above"]
 
 
+def document_band(text: str, cuts: dict | None) -> str | None:
+    """Primary CEFR band for *text*: calibrated readability when cuts are
+    present and textstat is available; otherwise the deterministic profiler
+    band; otherwise None. Calibrated is primary — CEFR_THRESHOLDS is only the
+    fallback path now."""
+    if cuts is not None:
+        band = readability_band(text, cuts)
+        if band is not None:
+            return band
+    if PROFILER_AVAILABLE:
+        return profile_text(text)["band"]
+    return None
+
+
 # ──────────────────────────────────────────────────────────────
 #  OLLAMA HELPER + LLM JUDGE
 # ──────────────────────────────────────────────────────────────
@@ -267,12 +281,16 @@ def assess_document(
         out["last_third"] = profile_text(_third(words, "last"))
     if run_llm and model:
         out["judge"] = judge_level(text, target_level, model, timeout)
+    out["calibrated_band"] = document_band(text, load_cuts())
     return out
 
 
 def format_report(assessment: dict, target_level: str) -> str:
     """Render *assessment* as a human-readable multi-line report."""
     lines = [f"CEFR assessment (target: {target_level})", "-" * 40]
+    cal = assessment.get("calibrated_band")
+    if cal:
+        lines.append(f"Calibrated band: {cal}  (readability-based, primary)")
     whole = assessment["whole"]
     if whole is None:
         lines.append("Feature profiler unavailable (spaCy/wordfreq not "

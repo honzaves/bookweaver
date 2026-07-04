@@ -173,3 +173,20 @@ class TestReadabilityBand:
 
     def test_load_cuts_missing_file_returns_none(self):
         assert level_detector.load_cuts("does_not_exist_xyz.json") is None
+
+
+class TestDocumentBand:
+    def test_document_band_prefers_calibrated(self, monkeypatch):
+        monkeypatch.setattr(level_detector, "readability_band", lambda t, c: "B2")
+        assert level_detector.document_band("x", CUTS) == "B2"
+
+    def test_document_band_falls_back_to_profiler(self, monkeypatch):
+        monkeypatch.setattr(level_detector, "readability_band", lambda t, c: None)
+        monkeypatch.setattr(level_detector, "PROFILER_AVAILABLE", True)
+        monkeypatch.setattr(level_detector, "profile_text", lambda t: {"band": "C1"})
+        assert level_detector.document_band("x", None) == "C1"
+
+    def test_document_band_none_when_nothing_available(self, monkeypatch):
+        monkeypatch.setattr(level_detector, "readability_band", lambda t, c: None)
+        monkeypatch.setattr(level_detector, "PROFILER_AVAILABLE", False)
+        assert level_detector.document_band("x", None) is None
