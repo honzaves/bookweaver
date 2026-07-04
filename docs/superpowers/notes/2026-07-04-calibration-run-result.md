@@ -70,6 +70,39 @@ The calibration infrastructure (`calibrate_advisory.py`, `readability_band`, `lo
 
 Readability formulas measure surface length/syllable features and are blind to grammar and vocabulary range — the things CEFR actually grades (this was anticipated). To beat ~33% you need either a multi-feature model (readability + subjunctive + rare-word, fit on labeled data) or a proper transformer CEFR classifier (research ceiling ~70% for Spanish, and still no C2 data). Both are larger efforts than an advisory warrants.
 
+## Follow-up: does a 2-feature fit help? (subjunctive tested)
+
+Extracted `subjunctive_ratio`, `mean_sentence_len`, `rare_word_pct` (via
+`level_detector.profile_text`) alongside ease on a balanced 600/band B1/B2/C1
+sample and fit multinomial logistic models (stratified 70/30 held-out; 33%
+majority baseline):
+
+| model | held-out acc | recall B1/B2/C1 |
+|---|---|---|
+| ease only | 53% | 74/42/43 |
+| **ease + subjunctive** | **54%** | 74/41/47 |
+| sent_len only | 52% | 74/37/44 |
+| ease + sent_len | **61%** | 77/52/53 |
+| all four | 60% | 74/53/52 |
+
+Per-band medians (same sample): **subjunctive% is flat — B1 3.45, B2 3.64, C1
+3.39** — so it adds essentially nothing (+0.8pt). The one feature that tracks
+CEFR monotonically is **mean_sentence_len (13.2 → 18.3 → 21.0)**. Best cheap
+model is **ease + sentence-length ≈ 61%**.
+
+**But that 61% is not shippable as a trustworthy advisory:** (a) B2/C1 recall is
+still ~52% — a coin flip at the exact boundary that matters; (b) it's fit on
+*learner-proficiency* data (wrong construct — measures the writer, not reading
+difficulty), and the reference/reading data (right construct) is too small
+(~189 rows) to fit a 3-class model; (c) still no C2; (d) it is a logistic model,
+not the threshold scheme the shipped `readability_band`/`calibrate_advisory`
+use, so shipping it means a persisted model + a runtime spaCy dependency for the
+advisory — the same weight as the profiler it was meant to be lighter than.
+
+**Net: subjunctive does not rescue calibration; sentence-length lifts it to
+~61% but not to trustworthy, and only on the wrong construct. Recommendation
+stands — keep the raw advisory, ship no cuts.**
+
 ## Reproducibility
 
 UniversalCEFR datasets: `UniversalCEFR/caes_es`, `UniversalCEFR/hablacultura_es`, `UniversalCEFR/kwiqiz_es` (all CC-BY-NC-4.0). Score ≥150-word texts with `textstat.fernandez_huerta` (es), feed `[[ease, band], …]` to `calibrate_advisory.fit_cuts`.
