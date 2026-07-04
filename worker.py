@@ -571,6 +571,7 @@ class ProcessingWorker(QThread):
         failed retry keeps the previous attempt instead. Never raises."""
         import level_detector
         from prompts import build_simplify_note
+        cuts = level_detector.load_cuts()
 
         text = self._ollama_call(
             model, build_fn(""), label=label, temperature=temperature
@@ -589,11 +590,12 @@ class ProcessingWorker(QThread):
                     "muted",
                 )
                 return text
-            if level_detector.band_distance(m["band"], target_level) < 2:
+            band = level_detector.document_band(text, cuts) or m["band"]
+            if level_detector.band_distance(band, target_level) < 2:
                 return text
             if attempt == max_retries:
                 self.log.emit(
-                    f"   ⚠️  {label}: still {m['band']} after {max_retries} "
+                    f"   ⚠️  {label}: still {band} after {max_retries} "
                     f"regeneration(s) (target {target_level}) — keeping the "
                     "last attempt.",
                     "warning",
@@ -602,13 +604,13 @@ class ProcessingWorker(QThread):
             if self._abort:
                 return text
             self.log.emit(
-                f"   ⚠️  {label}: assessed {m['band']} vs target "
+                f"   ⚠️  {label}: assessed {band} vs target "
                 f"{target_level} — regenerating with a stricter prompt "
                 f"(retry {attempt + 1}/{max_retries})…",
                 "warning",
             )
             retry = self._ollama_call(
-                model, build_fn(build_simplify_note(m["band"], target_level)),
+                model, build_fn(build_simplify_note(band, target_level)),
                 label=label, temperature=temperature,
             )
             if retry is None:

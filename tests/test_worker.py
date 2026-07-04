@@ -714,6 +714,9 @@ class TestValidatedChunk:
         w = self._worker()
         w._ollama_call = MagicMock(side_effect=["c1 hard", "b1 easy"])
         with patch("level_detector.PROFILER_AVAILABLE", True), \
+             patch("level_detector.load_cuts", return_value=None), \
+             patch("level_detector.document_band",
+                   side_effect=["C1", "B1"]), \
              patch("level_detector.profile_text",
                    side_effect=[{"band": "C1", "n_words": 500},
                                 {"band": "B1", "n_words": 500}]):
@@ -766,3 +769,26 @@ class TestValidatedChunk:
             "m", lambda note: "P", "B1", "lbl", 0.4
         )
         assert out is None
+
+
+def test_validated_chunk_uses_document_band(monkeypatch):
+    import level_detector
+    calls = {"n": 0}
+    def fake_document_band(text, cuts):
+        calls["n"] += 1
+        return "B1"  # at/below target => accept, no regeneration
+    monkeypatch.setattr(level_detector, "load_cuts", lambda: {"x": 1})
+    monkeypatch.setattr(level_detector, "document_band", fake_document_band)
+    monkeypatch.setattr(level_detector, "PROFILER_AVAILABLE", True)
+    monkeypatch.setattr(level_detector, "profile_text",
+                        lambda t: {"band": "C1", "n_words": 300})
+
+    w = ProcessingWorker.__new__(ProcessingWorker)
+    w._timeout = 1
+    w._abort = False
+    w.log = type("S", (), {"emit": lambda *a, **k: None})()
+    w._ollama_call = lambda *a, **k: "un texto en español " * 60
+    out = w._generate_validated_chunk(
+        "m", lambda note: "prompt", "B1", "Translate 1.1/1", 0.3)
+    assert out is not None
+    assert calls["n"] >= 1  # gate consulted the calibrated band
