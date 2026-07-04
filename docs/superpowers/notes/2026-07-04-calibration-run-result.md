@@ -103,6 +103,44 @@ advisory — the same weight as the profiler it was meant to be lighter than.
 ~61% but not to trustworthy, and only on the wrong construct. Recommendation
 stands — keep the raw advisory, ship no cuts.**
 
+## Follow-up 2: benchmarking the pre-trained UniversalCEFR classifier
+
+UniversalCEFR publishes two ready-made multilingual A1–C2 classifiers
+(`xlm-roberta-base-cefr-all-classifier`, `ModernBERT-base-cefr-all-classifier`)
+— the spike missed these. Benchmarked the XLM-R one on Spanish. **Critical
+caveat: the "-all" model was fine-tuned on the full UniversalCEFR corpus, which
+INCLUDES caes/hablacultura/kwiziq — so every number below is in-sample
+(training data), an optimistic upper bound; real generalization is worse.**
+
+| Spanish set | in-sample acc | key per-band |
+|---|---|---|
+| caes (learner essays) | **99.5%** | pure memorization of training data |
+| reference (reading material) | **52.0%** | B2 87%, but **C1 recall 23%** (33/53 C1 → B2) |
+
+Findings:
+- The **99.5% on caes is contamination** (memorized homogeneous learner essays)
+  — and it's the wrong construct (writer proficiency). The model card's headline
+  **F1 0.95** is the same artifact: a random split dominated by the large, easy,
+  memorized learner sets. The paper's harder ~69.6% weighted F1 is the more
+  honest figure.
+- On the **right-construct reading data it manages only 52% in-sample**, and it
+  **fails at the B2/C1 boundary exactly like the surface features** (C1 collapses
+  to B2). Out-of-sample would be worse.
+- It **never predicts C2 for any Spanish text** — cross-lingual C2 transfer does
+  not materialize. The C2 gap is not closed by the multilingual model.
+
+**Conclusion on "would a neural net help":** No — not for BookWeaver's need. The
+ready-made SOTA transformer, even with a memorization advantage, lands ~52% on
+the right construct, reproduces the same B2/C1 failure, and yields no C2. The
+impressive numbers are memorized learner-production data. Architecture is not
+the bottleneck; **right-construct labeled reading data (with C2) is**, and that
+does not exist openly. Recommendation is unchanged and now strongly evidenced:
+keep the raw advisory, ship no cuts, don't train or adopt a classifier.
+
+If neural-grade holistic judgement is ever wanted, the existing `judge_level()`
+LLM judge is the pragmatic option (no training, reads vocab/grammar directly),
+accepting its cost/latency and that it is still not ground truth.
+
 ## Reproducibility
 
 UniversalCEFR datasets: `UniversalCEFR/caes_es`, `UniversalCEFR/hablacultura_es`, `UniversalCEFR/kwiqiz_es` (all CC-BY-NC-4.0). Score ≥150-word texts with `textstat.fernandez_huerta` (es), feed `[[ease, band], …]` to `calibrate_advisory.fit_cuts`.

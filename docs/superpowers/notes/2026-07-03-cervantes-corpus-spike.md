@@ -4,6 +4,18 @@
 **Author:** AI spike (Task 6)  
 **Status:** DONE — fallback selected
 
+> **Corrections (2026-07-04, after benchmarking — see
+> `2026-07-04-calibration-run-result.md`):**
+> 1. `UniversalCEFR/cefr_sp_en` is **English** (its `lang` field is 100% `en`),
+>    NOT the "primary Spanish dataset." The Spanish data is
+>    `caes_es` + `hablacultura_es` + `kwiqiz_es` only; C2 is still absent.
+> 2. This spike missed that UniversalCEFR **publishes pre-trained classifiers**
+>    (`xlm-roberta-base-cefr-all-classifier`,
+>    `ModernBERT-base-cefr-all-classifier`, multilingual A1–C2). They were
+>    benchmarked on 2026-07-04: ~52% in-sample on the right-construct Spanish
+>    reading data, same B2/C1 collapse, and no C2 predictions for Spanish — so
+>    they do not change the fallback decision.
+
 ---
 
 ## 1. UniversalCEFR — Spanish Subset
