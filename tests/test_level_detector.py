@@ -151,3 +151,25 @@ class TestTextstatReadability:
                               "fernandez_huerta": staticmethod(lambda t: 72.34)})
         monkeypatch.setitem(__import__("sys").modules, "textstat", fake)
         assert level_detector.textstat_readability("Hola mundo.") == 72.3
+
+
+CUTS = {"formula": "fernandez_huerta",
+        "thresholds": [[40.0, "C2"], [60.0, "C1"], [80.0, "B2"]],
+        "above": "B1"}
+
+
+class TestReadabilityBand:
+    def test_readability_band_maps_scores(self, monkeypatch):
+        monkeypatch.setattr(level_detector, "textstat_readability", lambda t: 50.0)
+        assert level_detector.readability_band("x", CUTS) == "C1"
+        monkeypatch.setattr(level_detector, "textstat_readability", lambda t: 95.0)
+        assert level_detector.readability_band("x", CUTS) == "B1"
+        monkeypatch.setattr(level_detector, "textstat_readability", lambda t: 30.0)
+        assert level_detector.readability_band("x", CUTS) == "C2"
+
+    def test_readability_band_none_without_textstat(self, monkeypatch):
+        monkeypatch.setattr(level_detector, "textstat_readability", lambda t: None)
+        assert level_detector.readability_band("x", CUTS) is None
+
+    def test_load_cuts_missing_file_returns_none(self):
+        assert level_detector.load_cuts("does_not_exist_xyz.json") is None

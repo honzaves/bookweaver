@@ -156,6 +156,32 @@ def textstat_readability(text: str) -> float | None:
     return round(textstat.fernandez_huerta(text), 1)
 
 
+def load_cuts(path: str = "cefr_cuts.json") -> dict | None:
+    """Load calibrated ease-score cut points, or None if absent/unreadable."""
+    import json
+    import os
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def readability_band(text: str, cuts: dict) -> str | None:
+    """Calibrated CEFR band for *text* via fitted ease thresholds. None when
+    textstat is unavailable. Thresholds ascending; label = band for scores
+    below the threshold (hardest first)."""
+    score = textstat_readability(text)
+    if score is None:
+        return None
+    for thr, band in cuts["thresholds"]:
+        if score < thr:
+            return band
+    return cuts["above"]
+
+
 # ──────────────────────────────────────────────────────────────
 #  OLLAMA HELPER + LLM JUDGE
 # ──────────────────────────────────────────────────────────────
