@@ -347,31 +347,6 @@ class BookWeaverApp(QMainWindow):
         self._update_mp3_checkbox_state()
 
         ol.addSpacing(4)
-        ol.addWidget(QLabel("Language-level check:"))
-        self._level_check_group = QButtonGroup(self)
-        self._level_off_radio = QRadioButton("Off")
-        self._level_report_radio = QRadioButton("Report level at end of book")
-        self._level_validate_radio = QRadioButton(
-            "Validate each chunk — experimental, unreliable (regenerate if "
-            "2+ levels too hard) + report"
-        )
-        self._level_validate_radio.setToolTip(
-            "Per-chunk CEFR gating is a proxy and often misfires; leave Off "
-            "unless experimenting. Off is the default."
-        )
-        self._level_off_radio.setChecked(True)
-        for rb in (self._level_off_radio, self._level_report_radio,
-                   self._level_validate_radio):
-            self._level_check_group.addButton(rb)
-            ol.addWidget(rb)
-        # The validate path needs the spaCy profiler; grey it out if absent.
-        if importlib.util.find_spec("spacy") is None:
-            self._level_validate_radio.setEnabled(False)
-            self._level_validate_radio.setToolTip(
-                "Install spaCy + es_core_news_sm to enable per-chunk validation."
-            )
-
-        ol.addSpacing(4)
         ol.addWidget(QLabel("Output folder:"))
         self._out_folder = FolderPickerRow(
             "Same folder as source file (default)"
@@ -607,11 +582,6 @@ class BookWeaverApp(QMainWindow):
             "voice": (
                 self._voice_combo.currentData()
                 if self._mp3_chk.isChecked() else None
-            ),
-            "level_check": (
-                "validate" if self._level_validate_radio.isChecked()
-                else "report" if self._level_report_radio.isChecked()
-                else "off"
             ),
             "summary_lang": self._summary_target_lang(),
             "target_lang": (

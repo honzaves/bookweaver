@@ -153,30 +153,6 @@ def build_context_block(names: list[str] | None, prior_prose: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────────
-#  SIMPLIFY-HARDER NOTE  (regeneration instruction)
-# ──────────────────────────────────────────────────────────────
-def build_simplify_note(detected: str, target: str) -> str:
-    """Return the standard regeneration instruction used when a produced
-    chapter was assessed above the target CEFR level and must be redone
-    in simpler Spanish."""
-    return (
-        f"Your previous version was assessed at {detected} but the target "
-        f"is {target}. It is too advanced: use more common, everyday words, "
-        "shorter sentences, and avoid the subjunctive where a simpler "
-        "construction works."
-    )
-
-
-def _simplify_block(simplify_note: str) -> str:
-    """Render *simplify_note* as its own delimited instruction line placed
-    after the level guidance (so it reads as an override). Empty note →
-    empty string, keeping the default prompt output byte-identical."""
-    if not simplify_note:
-        return ""
-    return f"SIMPLIFICATION OVERRIDE (most important): {simplify_note}\n\n"
-
-
-# ──────────────────────────────────────────────────────────────
 #  PUBLIC BUILDERS
 # ──────────────────────────────────────────────────────────────
 def build_summary_prompt(
@@ -218,14 +194,11 @@ def build_translation_prompt(
     chapter_index: int,
     creativity: int = 5,
     context_block: str = "",
-    simplify_note: str = "",
 ) -> str:
     """
     Return a prompt that asks the LLM to translate *chunk_text* directly
     into Spanish at CEFR *level* with the given *creativity* (1–10).
-    No summarisation — the full source text is preserved. A non-empty
-    *simplify_note* is appended after the level guidance as an override
-    instruction (used on regeneration).
+    No summarisation — the full source text is preserved.
     """
     guidance = _LEVEL_GUIDANCE.get(level, _LEVEL_GUIDANCE["B2"])
     creativity_text = _creativity_instruction(creativity)
@@ -236,7 +209,6 @@ def build_translation_prompt(
         "content, structure, and meaning of the original.\n\n"
         f"TARGET LEVEL: CEFR {level}\n"
         f"LANGUAGE GUIDANCE: {guidance}\n\n"
-        f"{_simplify_block(simplify_note)}"
         f"CREATIVITY LEVEL: {creativity}/10\n"
         f"CREATIVITY GUIDANCE: {creativity_text}\n\n"
         "STRICT RULES:\n"
@@ -264,13 +236,10 @@ def build_rewrite_prompt(
     chapter_index: int,
     creativity: int = 5,
     context_block: str = "",
-    simplify_note: str = "",
 ) -> str:
     """
     Return a prompt that asks the LLM to rewrite *summary* as a Spanish
     narrative chapter at CEFR *level* with the given *creativity* (1–10).
-    A non-empty *simplify_note* is appended after the level guidance as an
-    override instruction (used on regeneration).
     """
     guidance = _LEVEL_GUIDANCE.get(level, _LEVEL_GUIDANCE["B2"])
     creativity_text = _creativity_instruction(creativity)
@@ -280,7 +249,6 @@ def build_rewrite_prompt(
         "chapter summary as a vivid, engaging Spanish narrative chapter.\n\n"
         f"TARGET LEVEL: CEFR {level}\n"
         f"LANGUAGE GUIDANCE: {guidance}\n\n"
-        f"{_simplify_block(simplify_note)}"
         f"CREATIVITY LEVEL: {creativity}/10\n"
         f"CREATIVITY GUIDANCE: {creativity_text}\n\n"
         "STRICT RULES:\n"

@@ -141,6 +141,10 @@
   .pill{display:inline-flex;align-items:center;gap:6px;font:10px ui-monospace;color:#7a7870;border:1px solid #2e2f2a;border-radius:99px;padding:4px 9px}
   .anno{font:600 16px/1.1 'Caveat',cursive;color:#c19a52}
 
+  .selraw{width:100%;background:#0f0f0c;border:1px solid #36372f;border-radius:7px;padding:9px 34px 9px 11px;color:#cfc9ba;font:12.5px ui-monospace,Menlo,monospace;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'><path d='M1 1l4 4 4-4' stroke='%237a7870' stroke-width='1.4' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 12px center;transition:.15s}
+  .selraw:hover{border-color:#55564d}
+  .selraw:focus{outline:none;border-color:#8a6a2e}
+  .selraw option{background:#1a1b18;color:#cfc9ba}
   .indent{margin-left:26px;padding-left:14px;border-left:1px solid #2e2f2a}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 </style>
@@ -239,15 +243,17 @@
             <div class="field drop" style="max-width:280px">B2 — Vantage <span class="cv">▾</span></div>
             <div class="leg" style="margin-top:8px">Target CEFR level for the rewritten Spanish · B1 · B2 · C1 · C2</div>
           </div>
-          <div class="gc">
-            <div class="gct">Spanish level check <span class="meta">target: B2 — Vantage</span></div>
-            <div class="row" style="gap:10px">
-              <div class="tile {{ lcOff }}" style="flex:1" onClick="{{ setLcOff }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Off</span></div><div class="td">no level checking</div></div>
-              <div class="tile {{ lcEnd }}" style="flex:1" onClick="{{ setLcEnd }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Report at end</span></div><div class="td">analyse the finished book and report its CEFR level</div></div>
-              <div class="tile {{ lcChunk }}" style="flex:1" onClick="{{ setLcChunk }}"><div class="th"><span class="rd"><i></i></span><span class="tt">Validate each chunk</span></div><div class="td">re-check every chunk against B2, retry on drift — slower</div></div>
-            </div>
-          </div>
         </sc-if>
+        <div class="gc">
+          <div class="gct">Cross-chunk continuity <span class="meta">for chapters split into chunks</span></div>
+          <select class="selraw" style="max-width:340px" value="{{ cc }}" onChange="{{ onCc }}">
+            <option value="off">Off — no continuity aid</option>
+            <option value="names">Names only — protect proper nouns</option>
+            <option value="tail">Prose tail — scene-gated carry-over</option>
+            <option value="both">Both — names + prose tail</option>
+          </select>
+          <div class="note info" style="margin-top:11px">{{ ccNote }}</div>
+        </div>
       </div></div>
     </sc-if>
 
@@ -333,7 +339,7 @@ class Component extends DCLogic {
     step: 1,
     mode: 'sr',              // sr | full | sum | key
     keyLang: 'es',
-    levelCheck: 'off',       // off | end | chunk
+    cc: 'off',               // off | names | tail | both
     keep: 40,
     creativity: 5,
     formats: { txt: true, epub: true, html: false },
@@ -427,8 +433,13 @@ class Component extends DCLogic {
       showRecap: step>1, totalCh: s.chapters.length,
       targetSpanish,
       recapTail: s.chapters.length+' chapters · Gemma 4 31B'+(targetSpanish?' · B2':''),
-      lcOff:s.levelCheck==='off'?'sel':'', lcEnd:s.levelCheck==='end'?'sel':'', lcChunk:s.levelCheck==='chunk'?'sel':'',
-      setLcOff:()=>this.set({levelCheck:'off'}), setLcEnd:()=>this.set({levelCheck:'end'}), setLcChunk:()=>this.set({levelCheck:'chunk'}),
+      cc:s.cc, onCc:(e)=>this.set({cc:e.target.value}),
+      ccNote:{
+        off:'No continuity aid — each chunk is processed independently.',
+        names:'🔤 Character & place names from each chunk\u2019s source are passed to the model so spellings stay consistent across chunks. No extra model calls.',
+        tail:'🧵 The last ~120 words of the previous chunk\u2019s output are carried into the next prompt for smoother transitions; the carry resets at scene breaks & chapter starts. Also hard-splits chapters at scene breaks (* * *), which can add model calls.',
+        both:'🔤🧵 Both proper-noun protection and the scene-gated prose tail — highest continuity; may add model calls at scene breaks.',
+      }[s.cc],
       isS1:step===1,isS2:step===2,isS3:step===3,isS4:step===4,
 
       // chapters

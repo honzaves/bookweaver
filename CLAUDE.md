@@ -38,7 +38,6 @@ boundaries, processed independently, and rejoined.
 | `widgets.py` | All reusable Qt widgets | For new/changed widgets |
 | `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
 | `tts.py` | Kokoro TTS → MP3 audiobook with ID3 chapters; optional deps behind an import gate | For TTS/audio changes |
-| `level_detector.py` | Standalone CEFR level assessment (deterministic profiler + Ollama LLM-judge); optional deps behind an import gate | For level-detection changes |
 | `bookweaver.json` | All user-editable settings: colours, models, timeout, TTS voices | User edits; no code changes |
 
 ---
@@ -58,10 +57,6 @@ boundaries, processed independently, and rejoined.
    `mutagen`), all behind the `TTS_AVAILABLE` import gate; never Qt, never
    `app`/`worker`
    `settings` → nothing (stdlib only)
-   `level_detector` → optional profiler deps only (`spacy`, `wordfreq`,
-   `es_core_news_sm`), behind the `PROFILER_AVAILABLE` import gate, plus
-   `settings` (lazy, inside the CLI `main` only) and `httpx` (lazy, inside
-   `ollama_generate`); never Qt, never `app`/`worker`/`widgets`
    Never import `app` or `worker` from `widgets` or `settings`.
    `app.py` must not import `tts` — it checks Kokoro availability cheaply
    via `importlib.util.find_spec("kokoro")` to avoid loading torch at startup.
@@ -123,7 +118,6 @@ All user-editable values live in `bookweaver.json`:
 | `generate_mp3` | `bool` | Synthesise an MP3 audiobook after the text output (requires `"txt"` in `out_format` and the optional Kokoro install — see `kokoro.md`) |
 | `voice` | `str \| None` | Kokoro voice id (e.g. `"ef_dora"`); `None` when MP3 is off |
 | `carry_mode` | `str` | `"off"` (default), `"glossary"`, `"prose"`, or `"both"` — cross-chunk continuity. `glossary` only affects chapters split into multiple chunks; `prose`/`both` also hard-segment any chapter at scene breaks, which can turn a single-chunk chapter into several (see below) |
-| `level_check` | `str` | `"off"` (default), `"report"`, or `"validate"` — CEFR level checking. `report` logs an end-of-book assessment; `validate` additionally regenerates Spanish chunks assessed 2+ bands over `level` during the loop (see "Language-level detector") |
 | `target_lang` | `str` | `"es"` or `"en"` — from `TARGET_LANG[mode]` in `settings.py`; selects the voice list and Kokoro language |
 
 ### Per chapter
@@ -245,29 +239,6 @@ ideas). The book-wide synthesis call is excluded (post-loop, log-only).
 
 The log shows `Chapter 3.1/4`, `3.2/4` etc. when chunking is active.
 
-### Level check (optional)
-
-Driven by the `level_check` config key (`"off"`/`"report"`/`"validate"`, from
-the in-app radio group):
-
-- **`report`** — after all chapters, `_run_level_check()` assesses the
-  assembled output via `level_detector.assess_document()` and logs the report.
-  Log-only, post-loop, excluded from `total_steps`; skipped (with a log line)
-  when the output is English; a failure never fails the run.
-- **`validate`** — everything `report` does, plus per-chunk validation during
-  the loop: each of the three Spanish-producing call sites (translate,
-  summarise → rewrite, key-ideas-es rewrite) routes through
-  `ProcessingWorker._generate_validated_chunk()`, which profiles the fresh
-  chunk and regenerates it with `build_simplify_note()` while it sits 2+ CEFR
-  bands above `level` (max 2 retries, then the last attempt is kept with a
-  warning). Regeneration happens *within* an existing step — `total_steps` and
-  the progress bar are untouched. Spanish-only: the English summary calls are
-  never wrapped. Degrades silently: profiler absent or chunk under the
-  150-word floor → the first generation is accepted as-is. The helper returns
-  `None` only when the *first* Ollama call fails, so the existing per-site
-  fail/abort paths apply unchanged; a failed retry keeps the previous attempt
-  and the validate path never fails the run.
-
 ---
 
 ## Resume system
@@ -299,72 +270,6 @@ explicitly. This is intentional to prevent silent wrong values.
 
 Full translation mode generates more tokens than the summarise pipeline and
 may require a higher timeout, especially for large chapters.
-
----
-
-## Language-level detector
-
-`level_detector.py` is a Qt-free, standalone module (CLI + in-app)
-that assesses the CEFR level of a Spanish text via two independent assessors:
-
-- **Deterministic profiler** — `profile_text()` uses spaCy + wordfreq to
-  compute mean sentence length, rare-word % (Zipf < 3.5 on surface forms),
-  and subjunctive ratio, then maps them to a band (B1/B2/C1/C2) via
-  `band_from_metrics()` / `CEFR_THRESHOLDS`. `assess_document()` also
-  profiles the first and last thirds and flags drift between them.
-- **Ollama LLM-judge** — `judge_level()` sends `build_judge_prompt()` to the
-  local Ollama instance at temperature 0 via `ollama_generate()` (a
-  standalone twin of `worker._ollama_call`, so the CLI never touches the
-  QThread worker). Any error degrades gracefully to verdict `"?"` — it
-  never raises.
-
-**Gated dependencies:** the profiler deps (`spacy`, `wordfreq`,
-`es_core_news_sm`) sit behind a `PROFILER_AVAILABLE` import gate (with
-`PROFILER_IMPORT_ERROR` holding the reason when absent). The module imports
-and the LLM-judge work without them. Install with uv only:
-
-```bash
-uv pip install spacy wordfreq
-# The Spanish model must be installed as a pinned wheel whose version matches
-# the installed spaCy major.minor (check: python -c "import spacy; print(spacy.__version__)").
-# NEVER use `python -m spacy download` — it does not respect the uv venv.
-uv pip install \
-  "https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.8.0/es_core_news_sm-3.8.0-py3-none-any.whl"
-```
-
-**CLI:**
-
-```bash
-python level_detector.py output_ES_B1.txt --level B1 --no-llm          # profiler only
-python level_detector.py output_ES_B1.txt --level B1 --model gemma3:27b # + LLM judge
-```
-
-Flags: `--level` (target CEFR level, default `B2`), `--model` (Ollama model
-for the judge; omit to skip it), `--no-llm` (profiler only), `--timeout`
-(Ollama timeout in seconds, default `OLLAMA_TIMEOUT`). When the profiler
-deps are missing, the report says so and the judge still runs.
-
-**In-app integration:** the "Language-level check" radio group in `app.py`
-writes the `level_check` config key (`"off"`/`"report"`/`"validate"`).
-`"report"` runs the post-loop `_run_level_check()` report; `"validate"` also
-regenerates Spanish chunks during the loop via
-`ProcessingWorker._generate_validated_chunk()` — profiler-gated
-(`PROFILER_AVAILABLE`), 150-word floor, regenerate when
-`band_distance(detected, target) >= 2`, ≤2 retries with
-`prompts.build_simplify_note()` appended as an override, within-step (no
-`total_steps` change), Spanish-only, and it degrades silently when the
-profiler is absent or the chunk is short — it never fails the run (only a
-first-call Ollama failure propagates `None`, matching the plain call sites).
-The worker lazy-imports `level_detector` and accesses the gate/helpers as
-module attributes so tests can patch them. The UI disables the Validate radio
-when spaCy is absent (checked cheaply via `importlib.util.find_spec`).
-
-`_load_nlp()` deliberately excludes the parser, NER, and lemmatizer
-(memory: the parser costs on the order of 1 GB per 100k chars) and uses the
-rule-based sentencizer; the morphologizer stays because it supplies the
-`Mood=Sub` feature. Frequency is looked up on surface forms, so
-`rare_word_pct` runs a little hot on inflected Spanish — an accepted,
-tunable approximation.
 
 ---
 

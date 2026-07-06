@@ -163,10 +163,10 @@ targetIsSpanish = mode === 'summariseRewrite'
 // 'summariseOnly' (English) → false
 ```
 
-When `targetIsSpanish` is **false**, hide the **Spanish level** dropdown and the
-**Spanish level check** (both in step 2), and drop the level from the recap line.
-When it flips back to true, restore them. The default mode is Spanish, so both are
-visible on a fresh start.
+When `targetIsSpanish` is **false**, hide the **Spanish level** dropdown (step 2)
+and drop the level from the recap line. When it flips back to true, restore it. The
+default mode is Spanish, so it's visible on a fresh start. (The Cross-chunk
+continuity dropdown is **not** gated — it's always shown.)
 
 ---
 
@@ -210,25 +210,30 @@ visible on a fresh start.
     MP3 voice list in step 3." (And it must actually re-populate it.) Because this
     toggle can flip `targetIsSpanish`, it also drives the Spanish-only cards below.
 - **Spanish level** dropdown card — **shown only when `targetIsSpanish`**, placed
-  directly **above** the Spanish level check. Dropdown (`max-width 280px`)
+  directly **above** the Cross-chunk continuity card. Dropdown (`max-width 280px`)
   "B2 — Vantage" ▾; levels `B1 — Threshold`, `B2 — Vantage` (default),
   `C1 — Advanced`, `C2 — Mastery`. Helper: "Target CEFR level for the rewritten
   Spanish." *(Lives here rather than step 1 because it only applies when the mode
   produces Spanish output — a step-1 control can't depend on a step-2 choice.)*
-- **Spanish level check** card (`screenshots/04b-step2-spanish-level-check.png`)
-  — **shown only when `targetIsSpanish`**, directly below the Spanish level
-  dropdown. Title
-  row: `SPANISH LEVEL CHECK` + right-aligned meta `target: B2 — Vantage` (mirrors
-  the chosen CEFR level). A **3-across row of selectable tiles** (same tile styling
-  as the mode selector; single-select radio behavior), default **Off**:
-  1. **Off** *(default)* — "no level checking"
-  2. **Report at end** — "analyse the finished book and report its CEFR level"
-     (runs one CEFR assessment at completion; surfaces the detected level in the
-     run log / summary).
-  3. **Validate each chunk** — "re-check every chunk against B2, retry on drift —
-     slower" (validates each generated chunk against the target level and
-     regenerates chunks that drift off-level; increases run time).
-  State: `spanishLevelCheck` = `off | end | chunk`.
+- **Cross-chunk continuity** card (`screenshots/04b-step2-cross-chunk-continuity.png`)
+  — **always visible** (applies whenever a chapter is split into chunks,
+  regardless of mode/language). A styled **`<select>` dropdown** (`max-width 340px`,
+  the `.selraw` control — inset field with a right chevron), **default Off**, plus
+  a live info note below that updates with the selection. Four options (brief §5):
+  1. **Off — no continuity aid** *(default)* — "No continuity aid — each chunk is
+     processed independently."
+  2. **Names only — protect proper nouns** — character/place names found in each
+     chunk's source are passed to the model so spellings stay consistent across
+     chunks. No extra model calls.
+  3. **Prose tail — scene-gated carry-over** — the last ~120 words of the previous
+     chunk's output are carried into the next prompt for smoother transitions; the
+     carry resets at scene breaks & chapter starts. **Also hard-splits chapters at
+     scene breaks (`* * *`, `---`, `<hr>`), which can add model calls / progress
+     steps**; a `* * *` separator is restored in the output so nothing is lost.
+  4. **Both — names + prose tail** — both mechanisms together; highest continuity,
+     may add model calls at scene breaks.
+  State: `crossChunkContinuity` = `off | names | tail | both`. The descriptive
+  note beneath the dropdown communicates each option's cost/benefit.
 
 **The two sliders — preserve exactly (brief §5):**
 - *Track* `6px`, radius `99px`, `#2a2b24`, with faint tick marks; *knob* `17px`
@@ -325,8 +330,8 @@ State variables (see brief §5/§7 for full semantics):
 - `mode` (sr | full | sum | key; default sr)
 - `keyIdeasLanguage` (es|en) — only meaningful in `key` mode; drives voice list
 - **`targetIsSpanish`** (derived, see "Target language") — gates the step-2
-  Spanish level dropdown, the Spanish level check, and the recap level
-- `spanishLevelCheck` (off | end | chunk; default off) — only when targetIsSpanish
+  Spanish level dropdown and the recap level
+- `crossChunkContinuity` (off | names | tail | both; default off) — always shown
 - `keepPct` (10–90, default 40), `creativity` (1–10, default 5)
 - `formats {txt:true, epub:false, html:false}`, `mp3Enabled`, `mp3Available`,
   `voice`, `voiceList[]` (language-dependent)
@@ -361,7 +366,7 @@ non-essential.
   - `02-step2-transform.png` — Step 2, Summarise → rewrite (both sliders)
   - `03-step2-full-translation.png` — Step 2 with depth collapsed + translate note
   - `04-step2-key-ideas.png` — Step 2 with key-ideas language toggle revealed
-  - `04b-step2-spanish-level-check.png` — Step 2 Spanish level check card (shown when target is Spanish)
+  - `04b-step2-cross-chunk-continuity.png` — Step 2 Spanish level dropdown + Cross-chunk continuity (always shown)
   - `05-step3-output.png` — Step 3 (Output) default
   - `06-step3-output-advanced.png` — Step 3 with MP3 enabled + Voice revealed
   - `07-step4-run-idle.png` — Run console, idle

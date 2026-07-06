@@ -96,7 +96,6 @@ class ProcessingWorker(QThread):
         mode = cfg.get("mode", "summarise_rewrite")  # or "translate"
         carry_mode = cfg.get("carry_mode", "off")
         summary_lang = cfg.get("summary_lang", "es")
-        validate = cfg.get("level_check") == "validate"
         resume_from = cfg.get("resume_from", 0)
         meta = {
             "title": cfg.get("meta_title") or Path(epub_path).stem,
@@ -209,26 +208,13 @@ class ProcessingWorker(QThread):
                     self.log.emit(
                         f"\n── Chapter {chunk_label}/{len(chapters)}: translating…", "info"
                     )
-                    if validate:
-                        spanish = self._generate_validated_chunk(
-                            model,
-                            lambda note: build_translation_prompt(
-                                chunk, level, idx, creativity,
-                                context_block=context_block,
-                                simplify_note=note,
-                            ),
-                            level,
-                            f"Translate {chunk_label}",
-                            temperature,
-                        )
-                    else:
-                        spanish = self._ollama_call(
-                            model,
-                            build_translation_prompt(chunk, level, idx, creativity,
-                                                     context_block=context_block),
-                            label=f"Translate {chunk_label}",
-                            temperature=temperature,
-                        )
+                    spanish = self._ollama_call(
+                        model,
+                        build_translation_prompt(chunk, level, idx, creativity,
+                                                 context_block=context_block),
+                        label=f"Translate {chunk_label}",
+                        temperature=temperature,
+                    )
                     if spanish is None:
                         self.completed_results = results
                         self.failed_at_chapter = idx
@@ -292,26 +278,13 @@ class ProcessingWorker(QThread):
                             f"creativity {creativity}/10)…",
                             "info",
                         )
-                        if validate:
-                            rewritten = self._generate_validated_chunk(
-                                model,
-                                lambda note: build_rewrite_prompt(
-                                    summary, level, idx, creativity,
-                                    context_block=context_block,
-                                    simplify_note=note,
-                                ),
-                                level,
-                                f"Rewrite {chunk_label}",
-                                temperature,
-                            )
-                        else:
-                            rewritten = self._ollama_call(
-                                model,
-                                build_rewrite_prompt(summary, level, idx, creativity,
-                                                     context_block=context_block),
-                                label=f"Rewrite {chunk_label}",
-                                temperature=temperature,
-                            )
+                        rewritten = self._ollama_call(
+                            model,
+                            build_rewrite_prompt(summary, level, idx, creativity,
+                                                 context_block=context_block),
+                            label=f"Rewrite {chunk_label}",
+                            temperature=temperature,
+                        )
                         if rewritten is None:
                             self.completed_results = results
                             self.failed_at_chapter = idx
@@ -352,26 +325,13 @@ class ProcessingWorker(QThread):
                         f"rewriting in Spanish ({level}, creativity {creativity}/10)…",
                         "info",
                     )
-                    if validate:
-                        spanish = self._generate_validated_chunk(
-                            model,
-                            lambda note: build_rewrite_prompt(
-                                summary, level, idx, creativity,
-                                context_block=context_block,
-                                simplify_note=note,
-                            ),
-                            level,
-                            f"Rewrite {chunk_label}",
-                            temperature,
-                        )
-                    else:
-                        spanish = self._ollama_call(
-                            model,
-                            build_rewrite_prompt(summary, level, idx, creativity,
-                                                 context_block=context_block),
-                            label=f"Rewrite {chunk_label}",
-                            temperature=temperature,
-                        )
+                    spanish = self._ollama_call(
+                        model,
+                        build_rewrite_prompt(summary, level, idx, creativity,
+                                             context_block=context_block),
+                        label=f"Rewrite {chunk_label}",
+                        temperature=temperature,
+                    )
                     if spanish is None:
                         self.completed_results = results
                         self.failed_at_chapter = idx
@@ -492,136 +452,7 @@ class ProcessingWorker(QThread):
         if cfg.get("generate_mp3") and "txt" in out_formats:
             self._generate_mp3(results, out_folder, stem, level, meta, cfg)
 
-        # ── end-of-book language-level report (log-only, Spanish output only) ──
-        # Runs for both "report" and "validate"; "validate" additionally
-        # regenerated chunks inline during the loop (Task 10).
-        if cfg.get("level_check") in ("report", "validate"):
-            output_is_english = mode == "summarise_only" or (
-                mode == "summarise_key_ideas" and summary_lang == "en"
-            )
-            if output_is_english:
-                self.log.emit(
-                    "🔎  Level check skipped — it is Spanish-only and this "
-                    "output is English.",
-                    "muted",
-                )
-            else:
-                self._run_level_check(results, level, model)
-
         self.finished.emit(True, ", ".join(str(p) for p in out_paths))
-
-    # ── post-run language-level check (optional, log-only) ────
-    @staticmethod
-    def _readability_line(body: str) -> str | None:
-        """Format the raw (uncalibrated) readability advisory line, or None
-        when textstat is unavailable. Log-only; never triggers regeneration."""
-        import level_detector
-        score = level_detector.textstat_readability(body)
-        if score is None:
-            return None
-        return f"Readability (Fernández Huerta, raw ease): {score}"
-
-    def _run_level_check(
-        self,
-        results: list[tuple[str, str]],
-        target_level: str,
-        model: str,
-    ) -> None:
-        """Assess the assembled output's CEFR level and log a report.
-        Never raises — a failure here must not undo written output."""
-        try:
-            import level_detector
-        except ImportError as exc:
-            self.log.emit(f"Level check skipped (import failed: {exc}).", "warning")
-            return
-        body = "\n\n".join(body for _, body in results)
-        self.log.emit("\n🔎  Assessing output language level…", "info")
-        try:
-            assessment = level_detector.assess_document(
-                body, target_level, model=model, timeout=self._timeout,
-                run_llm=True,
-            )
-            for line in level_detector.format_report(
-                assessment, target_level
-            ).splitlines():
-                self.log.emit(f"   {line}", "muted")
-            line = self._readability_line(body)
-            if line:
-                self.log.emit(f"   {line}", "muted")
-        except Exception as exc:
-            self.log.emit(f"Level check failed: {exc}", "warning")
-
-    # ── per-chunk validate + regenerate (level_check == "validate") ──
-    def _generate_validated_chunk(
-        self,
-        model: str,
-        build_fn,
-        target_level: str,
-        label: str,
-        temperature: float,
-        max_retries: int = 2,
-        min_words: int = 150,
-    ) -> str | None:
-        """Generate a Spanish chunk via *build_fn(simplify_note) -> prompt*,
-        profile it, and regenerate with a stricter prompt while it sits 2+
-        CEFR bands above *target_level* (up to *max_retries* retries).
-        Degrades to plain generation when the profiler is absent or the text
-        is under the *min_words* floor. Returns None only when the FIRST
-        _ollama_call fails, so the caller's existing fail path applies; a
-        failed retry keeps the previous attempt instead. Never raises."""
-        import level_detector
-        from prompts import build_simplify_note
-        cuts = level_detector.load_cuts()
-
-        text = self._ollama_call(
-            model, build_fn(""), label=label, temperature=temperature
-        )
-        if text is None:
-            return None
-        if not level_detector.PROFILER_AVAILABLE:
-            return text
-
-        for attempt in range(max_retries + 1):
-            m = level_detector.profile_text(text)
-            if m["n_words"] < min_words:
-                self.log.emit(
-                    f"   ↳ Level gate skipped for {label}: "
-                    f"{m['n_words']} words is under the {min_words}-word floor.",
-                    "muted",
-                )
-                return text
-            band = level_detector.document_band(text, cuts) or m["band"]
-            if level_detector.band_distance(band, target_level) < 2:
-                return text
-            if attempt == max_retries:
-                self.log.emit(
-                    f"   ⚠️  {label}: still {band} after {max_retries} "
-                    f"regeneration(s) (target {target_level}) — keeping the "
-                    "last attempt.",
-                    "warning",
-                )
-                return text
-            if self._abort:
-                return text
-            self.log.emit(
-                f"   ⚠️  {label}: assessed {band} vs target "
-                f"{target_level} — regenerating with a stricter prompt "
-                f"(retry {attempt + 1}/{max_retries})…",
-                "warning",
-            )
-            retry = self._ollama_call(
-                model, build_fn(build_simplify_note(band, target_level)),
-                label=label, temperature=temperature,
-            )
-            if retry is None:
-                self.log.emit(
-                    f"   ⚠️  {label}: regeneration failed — keeping the "
-                    "previous attempt.",
-                    "warning",
-                )
-                return text
-            text = retry
-        return text
 
     # ── MP3 audiobook ─────────────────────────────────────────
     def _generate_mp3(

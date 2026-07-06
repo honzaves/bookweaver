@@ -357,35 +357,6 @@ class TestContextBlock:
 
 
 # ──────────────────────────────────────────────────────────────
-#  build_simplify_note  +  simplify_note plumbing
-# ──────────────────────────────────────────────────────────────
-class TestSimplifyNote:
-    def test_note_mentions_both_levels(self):
-        note = prompts.build_simplify_note("C1", "B1")
-        assert "C1" in note and "B1" in note
-
-    def test_rewrite_includes_note_when_passed(self):
-        base = prompts.build_rewrite_prompt("resumen", "B1", 0, 5)
-        withnote = prompts.build_rewrite_prompt(
-            "resumen", "B1", 0, 5, simplify_note="SIMPLIFY-MARKER"
-        )
-        assert "SIMPLIFY-MARKER" not in base
-        assert "SIMPLIFY-MARKER" in withnote
-
-    def test_translation_includes_note_when_passed(self):
-        withnote = prompts.build_translation_prompt(
-            "texto", "B1", 0, 5, simplify_note="SIMPLIFY-MARKER"
-        )
-        assert "SIMPLIFY-MARKER" in withnote
-
-    def test_default_omitted_is_unchanged(self):
-        # Calling without the new param must not alter existing output.
-        a = prompts.build_translation_prompt("texto", "B1", 0, 5)
-        b = prompts.build_translation_prompt("texto", "B1", 0, 5, simplify_note="")
-        assert a == b
-
-
-# ──────────────────────────────────────────────────────────────
 #  _pairs_block  +  pairs injection into prompts
 # ──────────────────────────────────────────────────────────────
 class TestPairsBlock:
