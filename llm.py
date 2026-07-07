@@ -260,3 +260,29 @@ def _mlx_generate(
         return text
 
     return _MLX_THREAD.submit(body).result()
+
+
+def unload(log: LogFn) -> None:
+    """Release the cached MLX runtime and its GPU memory (release-after-run
+    policy). No-op when nothing is loaded — including every ollama run —
+    and when mlx is not installed. Runs on the MLX thread; never raises."""
+    def body() -> None:
+        global _runtime, _runtime_repo
+        if _runtime is None:
+            return
+        _runtime = None
+        _runtime_repo = None
+        gc.collect()
+        try:
+            import mlx.core as mx
+            # clear_cache moved from mx.metal to mx top-level across versions.
+            clear = getattr(mx, "clear_cache", None) or mx.metal.clear_cache
+            clear()
+        except Exception:
+            pass  # mlx absent or API drift — refs are dropped either way
+        log("   ✓  MLX model released.", "muted")
+
+    try:
+        _MLX_THREAD.submit(body).result()
+    except Exception as exc:
+        log(f"   MLX unload failed: {exc}", "warning")

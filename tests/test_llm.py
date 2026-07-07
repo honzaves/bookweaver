@@ -16,6 +16,7 @@ Coverage
 - unload()                     releases the cached runtime, idempotent
 """
 
+import gc
 import sys
 import threading
 from types import ModuleType
@@ -299,3 +300,40 @@ class TestStripThinkingChannel:
     def test_splits_on_last_marker(self):
         text = "a<channel|>b<channel|>final"
         assert llm._strip_thinking_channel(text) == "final"
+
+
+class TestUnload:
+    def test_unload_releases_cached_runtime(self):
+        loader = MagicMock(return_value=_FakeRuntime())
+        with patch("llm._load_runtime", loader):
+            _gen(backend="mlx")
+            assert loader.call_count == 1
+            llm.unload(NO_LOG)
+            _gen(backend="mlx")
+        assert loader.call_count == 2
+
+    def test_unload_noop_when_nothing_loaded(self):
+        logs = []
+        llm.unload(_collecting_log(logs))  # must not raise
+        assert not any(level == "error" for _, level in logs)
+
+    def test_unload_is_idempotent(self):
+        with patch("llm._load_runtime", return_value=_FakeRuntime()):
+            _gen(backend="mlx")
+        llm.unload(NO_LOG)
+        llm.unload(NO_LOG)  # second call must not raise
+        assert llm._runtime is None
+
+    def test_unload_runs_on_mlx_thread(self):
+        recorded = {}
+        with patch("llm._load_runtime", return_value=_FakeRuntime()):
+            _gen(backend="mlx")
+        real_collect = gc.collect
+
+        def spying_collect():
+            recorded["thread"] = threading.current_thread().name
+            return real_collect()
+
+        with patch("llm.gc.collect", side_effect=spying_collect):
+            llm.unload(NO_LOG)
+        assert recorded["thread"].startswith("mlx")
