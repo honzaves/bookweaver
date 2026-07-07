@@ -73,6 +73,16 @@ def _is_absent(name: str) -> bool:
         return True
 
 for _name in ("kokoro", "soundfile", "lameenc", "mutagen", "mutagen.id3",
-              "torch"):
+              "torch",
+              # llm.py's mlx path probes these heavy optional packages.
+              # Empty stubs make `from mlx_lm import load` raise ImportError,
+              # which exercises the real install-failure path; tests that
+              # need working fakes monkeypatch richer modules over these.
+              # Bare "mlx"/"mlx.core" must NOT be stubbed: transformers
+              # (pulled in by a real kokoro install) probes
+              # find_spec("mlx"), which raises ValueError on a spec-less
+              # stub — same class of problem as the numpy note above.
+              "mlx_lm", "mlx_lm.sample_utils",
+              "mlx_vlm", "mlx_vlm.prompt_utils", "mlx_vlm.utils"):
     if _is_absent(_name):
         sys.modules.setdefault(_name, ModuleType(_name))
