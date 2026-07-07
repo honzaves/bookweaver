@@ -26,6 +26,21 @@ def _load_config(path: Path = _CONFIG_PATH) -> dict:
         raise SystemExit(f"[BookWeaver] Invalid JSON in config: {exc}")
 
 
+def _resolve_llm_backend(cfg: dict) -> str:
+    """Return the active backend: "mlx" or "ollama".
+
+    Absent key: new per-backend schema (models is a dict) means "mlx";
+    a legacy flat models list means "ollama". Invalid values fall back
+    to "ollama" (the UI's dynamic "Model (<backend>):" label makes the
+    outcome visible — _build has no logging channel)."""
+    backend = cfg.get("llm_backend")
+    if backend in ("mlx", "ollama"):
+        return backend
+    if backend is None and isinstance(cfg["models"], dict):
+        return "mlx"
+    return "ollama"
+
+
 def _build(path: Path = _CONFIG_PATH) -> None:
     """Load config and populate all module-level constants."""
     global C_BG, C_SURFACE, C_SURFACE2, C_BORDER, C_AMBER, C_AMBER_DIM
@@ -238,20 +253,6 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
     color: {C_BORDER};
 }}
 """
-
-    def _resolve_llm_backend(cfg: dict) -> str:
-        """Return the active backend: "mlx" or "ollama".
-
-        Absent key: new per-backend schema (models is a dict) means "mlx";
-        a legacy flat models list means "ollama". Invalid values fall back
-        to "ollama" (the UI's dynamic "Model (<backend>):" label makes the
-        outcome visible — _build has no logging channel)."""
-        backend = cfg.get("llm_backend")
-        if backend in ("mlx", "ollama"):
-            return backend
-        if backend is None and isinstance(cfg["models"], dict):
-            return "mlx"
-        return "ollama"
 
     llm_backend = _resolve_llm_backend(cfg)
     models = cfg["models"]
