@@ -25,8 +25,7 @@
   "models": {
     "mlx": [
       { "label": "Gemma 4 31B QAT (recommended)", "value": "mlx-community/gemma-4-31B-it-qat-8bit" },
-      { "label": "Gemma 4 26B MoE QAT (fast)",    "value": "mlx-community/gemma-4-26B-A4B-it-qat-mxfp8" },
-      { "label": "GLM-4.5-Air 4bit",              "value": "mlx-community/GLM-4.5-Air-4bit" }
+      { "label": "Gemma 4 26B MoE QAT (fast)",    "value": "mlx-community/gemma-4-26B-A4B-it-qat-mxfp8" }
     ],
     "ollama": [
       { "label": "Gemma 4 31B  (recommended)",     "value": "gemma4:31b-mxfp8" },
