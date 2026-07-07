@@ -120,8 +120,7 @@ class BookWeaverApp(QMainWindow):
         self._log.append_line(
             "Ready.  Configure settings above and press Start.", "muted"
         )
-        if (SETTINGS.get("llm_backend") == "mlx"
-                and importlib.util.find_spec("mlx_lm") is None):
+        if SETTINGS.get("llm_backend") == "mlx" and importlib.util.find_spec("mlx_lm") is None:
             self._log.append_line(
                 "⚠️  llm_backend is 'mlx' but mlx-lm is not installed — "
                 'run: uv pip install "mlx-lm>=0.31" "mlx-vlm>=0.6.1", '
