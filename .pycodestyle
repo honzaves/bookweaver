@@ -2,4 +2,5 @@
 max-line-length = 100
 # E221: multiple spaces before operator — intentionally used for
 #       aligned assignments in config/colour blocks. Suppress globally.
-ignore = E221
+# W503: line break before binary operator — modern PEP 8 accepts this style.
+ignore = E221, W503

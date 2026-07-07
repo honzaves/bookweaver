@@ -120,6 +120,14 @@ class BookWeaverApp(QMainWindow):
         self._log.append_line(
             "Ready.  Configure settings above and press Start.", "muted"
         )
+        if (SETTINGS.get("llm_backend") == "mlx"
+                and importlib.util.find_spec("mlx_lm") is None):
+            self._log.append_line(
+                "⚠️  llm_backend is 'mlx' but mlx-lm is not installed — "
+                'run: uv pip install "mlx-lm>=0.31" "mlx-vlm>=0.6.1", '
+                "or set llm_backend to 'ollama' in bookweaver.json.",
+                "warning",
+            )
         outer.addWidget(self._log)
         outer.addSpacing(12)
 
@@ -133,7 +141,7 @@ class BookWeaverApp(QMainWindow):
             f"font-size: 26px; font-weight: 800; "
             f"letter-spacing: -1px; color: {C_AMBER};"
         )
-        sub = QLabel("  EPUB → Spanish rewriter via Ollama")
+        sub = QLabel("  EPUB → Spanish rewriter via local LLM")
         sub.setStyleSheet(
             f"color: {C_MUTED}; font-size: 13px; margin-top: 6px;"
         )
@@ -167,7 +175,9 @@ class BookWeaverApp(QMainWindow):
 
         # ── model combo ──
         col1 = QVBoxLayout()
-        col1.addWidget(QLabel("Ollama model:"))
+        col1.addWidget(
+            QLabel(f"Model ({SETTINGS.get('llm_backend', 'ollama')}):")
+        )
         self._model_combo = QComboBox()
         default_val = SETTINGS.get("default_model", "gemma4:31b-mxfp8")
         default_idx = 0
@@ -370,6 +380,13 @@ class BookWeaverApp(QMainWindow):
         timeout_row.addStretch()
         ol.addLayout(timeout_row)
 
+        if SETTINGS.get("llm_backend") == "mlx":
+            self._timeout_spin.setEnabled(False)
+            self._timeout_spin.setToolTip(
+                "Ignored by the mlx backend — output is capped by "
+                "mlx_max_tokens in bookweaver.json."
+            )
+
         chunk_row = QHBoxLayout()
         chunk_row.addWidget(QLabel("Chunk size:"))
         self._chunk_spin = QSpinBox()
@@ -566,6 +583,7 @@ class BookWeaverApp(QMainWindow):
             "level": self._level_combo.currentData(),
             "keep_pct": self._slider.value(),
             "model": self._model_combo.currentData(),
+            "backend": SETTINGS.get("llm_backend", "ollama"),
             "out_format": out_fmt,
             "out_folder": out_folder,
             "selected_chapters": selected,
@@ -679,7 +697,8 @@ class BookWeaverApp(QMainWindow):
         self._log.clear()
         self._progress.reset()
         self._log.append_line(
-            f"Starting: model={cfg['model']}  level={cfg['level']}  "
+            f"Starting: backend={cfg['backend']}  model={cfg['model']}  "
+            f"level={cfg['level']}  "
             f"mode={cfg['mode']}  chunk={cfg['chunk_size']}w  "
             f"creativity={cfg['creativity']}/10  "
             f"format={cfg['out_format']}  → {cfg['out_folder']}",

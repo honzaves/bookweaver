@@ -2,7 +2,7 @@
   "_comment": "BookWeaver config — edit colours and models here. No code changes needed.",
 
   "ollama_timeout": 1200,
-  "llm_backend": "ollama",
+  "llm_backend": "mlx",
   "mlx_max_tokens": 8192,
 
   "chapter_title_preview_chars": 50,
