@@ -8,8 +8,7 @@ Coverage
 - creativity_to_temperature()   boundary values, monotonicity, return type
 - ProcessingWorker._write_txt() file content via tmp filesystem
 - ProcessingWorker._write_epub() basic file creation (and txt fallback)
-- ProcessingWorker._ollama_call() mocked httpx — success, empty response,
-                                   HTTP error, connection error
+- ProcessingWorker._llm_call() thin delegation to llm.generate
 """
 
 import json
@@ -20,7 +19,7 @@ import pytest
 
 import epub_io
 from worker import ProcessingWorker
-from settings import creativity_to_temperature
+from settings import creativity_to_temperature, SETTINGS
 
 
 # ──────────────────────────────────────────────────────────────
@@ -310,101 +309,36 @@ class TestWriteEpub:
 
 
 # ──────────────────────────────────────────────────────────────
-#  _ollama_call  (httpx.Client mocked throughout)
-#
-#  httpx is imported lazily *inside* _ollama_call, so we cannot
-#  patch "worker.httpx".  We patch "httpx.Client" directly instead.
+#  _llm_call — thin delegation to llm.generate
+#  (the backends themselves are tested in tests/test_llm.py)
 # ──────────────────────────────────────────────────────────────
-class TestOllamaCall:
-    def _mock_response(self, text: str, status: int = 200) -> MagicMock:
-        resp = MagicMock()
-        resp.status_code = status
-        resp.json.return_value = {"response": text}
-        resp.raise_for_status = MagicMock()
-        if status >= 400:
-            resp.raise_for_status.side_effect = Exception(f"HTTP {status}")
-        return resp
-
-    def _patched_client(self, mock_resp):
-        """Return a context-manager patch that injects mock_resp into httpx.Client."""
-        mock_client = MagicMock()
-        mock_client.post.return_value = mock_resp
-        cm = MagicMock()
-        cm.__enter__ = MagicMock(return_value=mock_client)
-        cm.__exit__ = MagicMock(return_value=False)
-        return patch("httpx.Client", return_value=cm), mock_client
-
-    def test_successful_call_returns_text(self):
+class TestLlmCallDelegation:
+    def test_delegates_and_returns_result(self):
         w = _make_worker()
-        mock_resp = self._mock_response("Este es el resultado.")
-        p, _ = self._patched_client(mock_resp)
-        with p:
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
-        assert result == "Este es el resultado."
+        with patch("llm.generate", return_value="hola") as gen:
+            result = w._llm_call(
+                "gemma3:27b", "Test prompt", label="T1", temperature=0.7
+            )
+        assert result == "hola"
+        assert gen.call_args[0] == ("Test prompt",)
+        kwargs = gen.call_args[1]
+        assert kwargs["backend"] == w._backend
+        assert kwargs["model"] == "gemma3:27b"
+        assert kwargs["temperature"] == 0.7
+        assert kwargs["label"] == "T1"
+        assert kwargs["timeout"] == w._timeout
+        assert kwargs["max_tokens"] == SETTINGS.get("mlx_max_tokens", 8192)
+        assert kwargs["log"] is w.log.emit
 
-    def test_empty_response_returns_none(self):
+    def test_backend_captured_from_config(self):
         w = _make_worker()
-        mock_resp = self._mock_response("")
-        p, _ = self._patched_client(mock_resp)
-        with p:
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
-        assert result is None
+        w.config["backend"] = "mlx"
+        w2 = ProcessingWorker(w.config)
+        assert w2._backend == "mlx"
 
-    def test_whitespace_only_response_returns_none(self):
-        w = _make_worker()
-        mock_resp = self._mock_response("   \n\n   ")
-        p, _ = self._patched_client(mock_resp)
-        with p:
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
-        assert result is None
-
-    def test_http_error_returns_none(self):
-        w = _make_worker()
-        mock_resp = self._mock_response("", status=500)
-        p, _ = self._patched_client(mock_resp)
-        with p:
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
-        assert result is None
-
-    def test_connection_error_returns_none(self):
-        w = _make_worker()
-        with patch("httpx.Client", side_effect=ConnectionError("refused")):
-            result = w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
-        assert result is None
-
-    def test_connection_error_emits_log(self):
-        w = _make_worker()
-        with patch("httpx.Client", side_effect=ConnectionError("refused")):
-            w._ollama_call("gemma3:27b", "Test prompt", label="T1", temperature=0.7)
-        w.log.emit.assert_called()
-        args = w.log.emit.call_args[0]
-        assert args[1] == "error"
-
-    def test_temperature_passed_to_ollama(self):
-        w = _make_worker()
-        mock_resp = self._mock_response("ok")
-        p, mock_client = self._patched_client(mock_resp)
-        with p:
-            w._ollama_call("gemma3:27b", "prompt", temperature=0.75)
-        payload = mock_client.post.call_args[1]["json"]
-        assert payload["options"]["temperature"] == 0.75
-
-    def test_model_name_passed_to_ollama(self):
-        w = _make_worker()
-        mock_resp = self._mock_response("ok")
-        p, mock_client = self._patched_client(mock_resp)
-        with p:
-            w._ollama_call("llama3.3:70b", "prompt", temperature=0.7)
-        payload = mock_client.post.call_args[1]["json"]
-        assert payload["model"] == "llama3.3:70b"
-
-    def test_response_is_stripped(self):
-        w = _make_worker()
-        mock_resp = self._mock_response("  stripped text  ")
-        p, _ = self._patched_client(mock_resp)
-        with p:
-            result = w._ollama_call("gemma3:27b", "prompt", temperature=0.7)
-        assert result == "stripped text"
+    def test_backend_defaults_to_settings(self):
+        w = _make_worker()  # config has no "backend" key
+        assert w._backend == SETTINGS.get("llm_backend", "ollama")
 
 
 class TestChapterBlock:
@@ -445,7 +379,7 @@ class TestRunChapterSelection:
             "chunk_size": 2000,
             "selected_chapters": [0, 2],
         })
-        with patch.object(ProcessingWorker, "_ollama_call", return_value="texto"), \
+        with patch.object(ProcessingWorker, "_llm_call", return_value="texto"), \
                 patch.object(epub_io, "extract_chapters", return_value=chapters):
             w.run()
 

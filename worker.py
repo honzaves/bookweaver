@@ -5,7 +5,8 @@ ProcessingWorker runs the full pipeline in a background QThread so the
 UI stays responsive during long processing jobs.
 
 Pipeline per chapter:
-  1. Summarise (English → compressed English) via Ollama
+  1. Summarise (English → compressed English) via the configured LLM
+     backend (mlx-lm in-process, or a local Ollama server)
   2. Rewrite   (compressed English → Spanish at target CEFR level)
 
 Output is written as plain text or EPUB depending on the job config.
@@ -58,6 +59,9 @@ class ProcessingWorker(QThread):
         self._abort = False
         self._timeout = config.get("timeout", OLLAMA_TIMEOUT)
         self._chunk_size = config.get("chunk_size", 2000)
+        self._backend = config.get(
+            "backend", SETTINGS.get("llm_backend", "ollama")
+        )
         # Populated during run(); readable by the app after finished(False).
         self.completed_results: list[tuple[str, str]] = []
         self.failed_at_chapter: int = 0
@@ -70,7 +74,7 @@ class ProcessingWorker(QThread):
     def run(self) -> None:
         try:
             from ebooklib import epub as ebooklib_epub
-            import httpx
+            import httpx  # noqa: F401 — presence check for the ollama path
             import epub_io
         except ImportError as exc:
             self.log.emit(
@@ -80,7 +84,16 @@ class ProcessingWorker(QThread):
             )
             self.finished.emit(False, "")
             return
+        import llm
+        try:
+            self._run(ebooklib_epub, epub_io)
+        finally:
+            # Release-after-run policy: drop the mlx model on success,
+            # failure, abort, and every early return alike. No-op for
+            # ollama runs and when the model never loaded.
+            llm.unload(self.log.emit)
 
+    def _run(self, ebooklib_epub, epub_io) -> None:
         cfg = self.config
         epub_path = cfg["epub_path"]
         level = cfg["level"]
@@ -103,6 +116,13 @@ class ProcessingWorker(QThread):
             "language": cfg.get("meta_language") or "es",
             "contributor": cfg.get("meta_contributor") or "",
         }
+
+        if self._backend == "mlx":
+            self.log.emit(
+                f"ℹ️   mlx backend: timeout setting ignored; output capped "
+                f"at {SETTINGS.get('mlx_max_tokens', 8192)} tokens.",
+                "info",
+            )
 
         # ── load source EPUB ──────────────────────────────────
         self.log.emit(f"📖  Loading {Path(epub_path).name}…", "info")
@@ -208,7 +228,7 @@ class ProcessingWorker(QThread):
                     self.log.emit(
                         f"\n── Chapter {chunk_label}/{len(chapters)}: translating…", "info"
                     )
-                    spanish = self._ollama_call(
+                    spanish = self._llm_call(
                         model,
                         build_translation_prompt(chunk, level, idx, creativity,
                                                  context_block=context_block),
@@ -227,7 +247,7 @@ class ProcessingWorker(QThread):
                     self.log.emit(
                         f"\n── Chapter {chunk_label}/{len(chapters)}: summarising…", "info"
                     )
-                    summary = self._ollama_call(
+                    summary = self._llm_call(
                         model,
                         build_summary_prompt(chunk, keep_pct,
                                              context_block=context_block),
@@ -249,7 +269,7 @@ class ProcessingWorker(QThread):
                         f"\n── Chapter {chunk_label}/{len(chapters)}: summarising…",
                         "info",
                     )
-                    summary = self._ollama_call(
+                    summary = self._llm_call(
                         model,
                         build_summary_prompt(
                             chunk, keep_pct,
@@ -278,7 +298,7 @@ class ProcessingWorker(QThread):
                             f"creativity {creativity}/10)…",
                             "info",
                         )
-                        rewritten = self._ollama_call(
+                        rewritten = self._llm_call(
                             model,
                             build_rewrite_prompt(summary, level, idx, creativity,
                                                  context_block=context_block),
@@ -300,7 +320,7 @@ class ProcessingWorker(QThread):
                     self.log.emit(
                         f"\n── Chapter {chunk_label}/{len(chapters)}: summarising…", "info"
                     )
-                    summary = self._ollama_call(
+                    summary = self._llm_call(
                         model,
                         build_summary_prompt(chunk, keep_pct),
                         label=f"Summary {chunk_label}",
@@ -325,7 +345,7 @@ class ProcessingWorker(QThread):
                         f"rewriting in Spanish ({level}, creativity {creativity}/10)…",
                         "info",
                     )
-                    spanish = self._ollama_call(
+                    spanish = self._llm_call(
                         model,
                         build_rewrite_prompt(summary, level, idx, creativity,
                                              context_block=context_block),
@@ -350,7 +370,7 @@ class ProcessingWorker(QThread):
                     f"── Chapter {idx + 1}/{len(chapters)}: extracting key ideas…",
                     "info",
                 )
-                ideas = self._ollama_call(
+                ideas = self._llm_call(
                     model,
                     build_key_ideas_prompt(chapter_body, summary_lang, level),
                     label=f"Key ideas {idx + 1}",
@@ -393,7 +413,7 @@ class ProcessingWorker(QThread):
             )
             self.log.emit("\n🧩  Synthesising book-wide key ideas…", "info")
             ideas_text = self._collect_chapter_ideas(results, ch_header)
-            book = self._ollama_call(
+            book = self._llm_call(
                 model,
                 build_book_key_ideas_prompt(ideas_text, summary_lang, level),
                 label="Book key ideas",
@@ -875,7 +895,7 @@ class ProcessingWorker(QThread):
             prose = " ".join(prior_output.split()[-tail_words:])
         return build_context_block(names, prose)
 
-    def _ollama_call(
+    def _llm_call(
         self,
         model: str,
         prompt: str,
@@ -884,37 +904,17 @@ class ProcessingWorker(QThread):
         temperature: float,
     ) -> str | None:
         """
-        Send *prompt* to the local Ollama instance and return the response
-        text, or None on any error.
+        Send *prompt* to the configured LLM backend (mlx or ollama) and
+        return the response text, or None on any error.
         """
-        try:
-            import httpx
-            self.log.emit(
-                f"   ↳ Calling {model} (temp={temperature})…", "muted"
-            )
-            with httpx.Client(timeout=self._timeout) as client:
-                response = client.post(
-                    "http://localhost:11434/api/generate",
-                    json={
-                        "model": model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {"temperature": temperature},
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-                result = data.get("response", "").strip()
-                if not result:
-                    self.log.emit(
-                        f"   ⚠️  Empty response for {label}", "warning"
-                    )
-                    return None
-                word_count = len(result.split())
-                self.log.emit(
-                    f"   ✓  {label}: {word_count} words generated.", "muted"
-                )
-                return result
-        except Exception as exc:
-            self.log.emit(f"   Ollama error ({label}): {exc}", "error")
-            return None
+        import llm
+        return llm.generate(
+            prompt,
+            backend=self._backend,
+            model=model,
+            temperature=temperature,
+            max_tokens=SETTINGS.get("mlx_max_tokens", 8192),
+            timeout=self._timeout,
+            label=label,
+            log=self.log.emit,
+        )
