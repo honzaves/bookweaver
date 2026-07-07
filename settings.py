@@ -239,9 +239,32 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
 }}
 """
 
+    def _resolve_llm_backend(cfg: dict) -> str:
+        """Return the active backend: "mlx" or "ollama".
+
+        Absent key: new per-backend schema (models is a dict) means "mlx";
+        a legacy flat models list means "ollama". Invalid values fall back
+        to "ollama" (the UI's dynamic "Model (<backend>):" label makes the
+        outcome visible — _build has no logging channel)."""
+        backend = cfg.get("llm_backend")
+        if backend in ("mlx", "ollama"):
+            return backend
+        if backend is None and isinstance(cfg["models"], dict):
+            return "mlx"
+        return "ollama"
+
+    llm_backend = _resolve_llm_backend(cfg)
+    models = cfg["models"]
+    default_model = cfg["default_model"]
+    if isinstance(models, dict):
+        models = models[llm_backend]
+        default_model = cfg["default_model"][llm_backend]
+
     SETTINGS = {
-        "models":        cfg["models"],
-        "default_model": cfg["default_model"],
+        "llm_backend":   llm_backend,
+        "models":        models,
+        "default_model": default_model,
+        "mlx_max_tokens": int(cfg.get("mlx_max_tokens", 8192)),
         "voices":        cfg.get("voices", {}),
         "tts":           cfg.get("tts", {}),
         "chapter_title_preview_chars": int(

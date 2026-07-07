@@ -223,3 +223,71 @@ class TestTargetLangKeyIdeas:
     def test_summarise_key_ideas_default_es(self):
         from settings import TARGET_LANG
         assert TARGET_LANG["summarise_key_ideas"] == "es"
+
+
+# ──────────────────────────────────────────────────────────────
+#  llm_backend resolution & per-backend model lists
+# ──────────────────────────────────────────────────────────────
+MLX_CFG = {
+    **MINIMAL_CFG,
+    "llm_backend": "mlx",
+    "mlx_max_tokens": 4096,
+    "models": {
+        "mlx":    [{"label": "M", "value": "mlx-community/test-model"}],
+        "ollama": [{"label": "O", "value": "test:1b"}],
+    },
+    "default_model": {"mlx": "mlx-community/test-model", "ollama": "test:1b"},
+}
+
+
+class TestLlmBackendConfig:
+    @pytest.fixture(autouse=True)
+    def _restore_real_config(self):
+        yield
+        _build()  # restore module globals from the real bookweaver.json
+
+    def test_mlx_backend_flattens_models_to_mlx_list(self, tmp_path):
+        p = _write_json(tmp_path, MLX_CFG)
+        _build(p)
+        assert settings_module.SETTINGS["llm_backend"] == "mlx"
+        assert settings_module.SETTINGS["models"] == MLX_CFG["models"]["mlx"]
+        assert settings_module.SETTINGS["default_model"] == "mlx-community/test-model"
+
+    def test_ollama_backend_selects_ollama_list(self, tmp_path):
+        cfg = {**MLX_CFG, "llm_backend": "ollama"}
+        p = _write_json(tmp_path, cfg)
+        _build(p)
+        assert settings_module.SETTINGS["llm_backend"] == "ollama"
+        assert settings_module.SETTINGS["models"] == MLX_CFG["models"]["ollama"]
+        assert settings_module.SETTINGS["default_model"] == "test:1b"
+
+    def test_old_flat_schema_defaults_to_ollama(self, tmp_path):
+        # MINIMAL_CFG has no llm_backend and a flat models list.
+        p = _write_json(tmp_path, MINIMAL_CFG)
+        _build(p)
+        assert settings_module.SETTINGS["llm_backend"] == "ollama"
+        assert settings_module.SETTINGS["models"] == MINIMAL_CFG["models"]
+        assert settings_module.SETTINGS["default_model"] == "test:1b"
+
+    def test_missing_key_with_dict_schema_defaults_to_mlx(self, tmp_path):
+        cfg = {k: v for k, v in MLX_CFG.items() if k != "llm_backend"}
+        p = _write_json(tmp_path, cfg)
+        _build(p)
+        assert settings_module.SETTINGS["llm_backend"] == "mlx"
+
+    def test_invalid_backend_falls_back_to_ollama(self, tmp_path):
+        cfg = {**MLX_CFG, "llm_backend": "banana"}
+        p = _write_json(tmp_path, cfg)
+        _build(p)
+        assert settings_module.SETTINGS["llm_backend"] == "ollama"
+        assert settings_module.SETTINGS["models"] == MLX_CFG["models"]["ollama"]
+
+    def test_mlx_max_tokens_from_config(self, tmp_path):
+        p = _write_json(tmp_path, MLX_CFG)
+        _build(p)
+        assert settings_module.SETTINGS["mlx_max_tokens"] == 4096
+
+    def test_mlx_max_tokens_defaults_to_8192(self, tmp_path):
+        p = _write_json(tmp_path, MINIMAL_CFG)
+        _build(p)
+        assert settings_module.SETTINGS["mlx_max_tokens"] == 8192

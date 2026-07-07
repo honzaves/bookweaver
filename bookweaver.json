@@ -2,6 +2,9 @@
   "_comment": "BookWeaver config — edit colours and models here. No code changes needed.",
 
   "ollama_timeout": 1200,
+  "llm_backend": "ollama",
+  "mlx_max_tokens": 8192,
+
   "chapter_title_preview_chars": 50,
 
   "colors": {
@@ -19,13 +22,23 @@
     "sweet":     "#7aab6e"
   },
 
-  "models": [
-    { "label": "Gemma 4 31B  (recommended)", "value": "gemma4:31b-mxfp8"   },
-    { "label": "Gemma 4 26B  (2nd recommended)", "value": "gemma4:26b-mxfp8"   },
-    { "label": "Gemma 3 27B  (3rd recommended)", "value": "gemma3:27b"   }
-  ],
+  "models": {
+    "mlx": [
+      { "label": "Gemma 4 31B QAT (recommended)", "value": "mlx-community/gemma-4-31B-it-qat-8bit" },
+      { "label": "Gemma 4 26B MoE QAT (fast)",    "value": "mlx-community/gemma-4-26B-A4B-it-qat-mxfp8" },
+      { "label": "GLM-4.5-Air 4bit",              "value": "mlx-community/GLM-4.5-Air-4bit" }
+    ],
+    "ollama": [
+      { "label": "Gemma 4 31B  (recommended)",     "value": "gemma4:31b-mxfp8" },
+      { "label": "Gemma 4 26B  (2nd recommended)", "value": "gemma4:26b-mxfp8" },
+      { "label": "Gemma 3 27B  (3rd recommended)", "value": "gemma3:27b" }
+    ]
+  },
 
-  "default_model": "gemma4:31b-mxfp8",
+  "default_model": {
+    "mlx": "mlx-community/gemma-4-31B-it-qat-8bit",
+    "ollama": "gemma4:31b-mxfp8"
+  },
 
   "tts": {
     "default_voice_es": "ef_dora",
