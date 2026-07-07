@@ -35,6 +35,7 @@ boundaries, processed independently, and rejoined.
 | `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); opt-in `mark_scene_breaks` scene-break sentinel; shared by app & worker | For chapter extraction/title logic |
 | `worker.py` | Background thread, pipeline, file output (no longer extracts chapters inline — delegates to `epub_io`) | For pipeline changes |
 | `prompts.py` | All LLM prompt strings, incl. `build_context_block` (continuity) | For prompt tuning |
+| `llm.py` | LLM backends — in-process mlx-lm/mlx-vlm (default) and local Ollama; lazy optional imports, Qt-free | For backend/LLM-call changes |
 | `widgets.py` | All reusable Qt widgets | For new/changed widgets |
 | `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
 | `tts.py` | Kokoro TTS → MP3 audiobook with ID3 chapters; optional deps behind an import gate | For TTS/audio changes |
@@ -49,6 +50,10 @@ boundaries, processed independently, and rejoined.
    `app` → `epub_io` (lazy, in `_on_epub_selected`)
    `worker` → `prompts`, `settings`, `tts` (lazy, inside `_generate_mp3` only)
    `worker` → `epub_io` (lazy, inside `run`)
+   `worker` → `llm` (lazy, inside `run` / `_llm_call`)
+   `llm` → `httpx` and optional mlx deps only (`mlx_lm`, `mlx_vlm`,
+   `mlx.core`), all imported lazily inside functions/constructors; never
+   Qt, never `app`/`worker`/`settings`
    `widgets` → `settings` (only — `ChapterListWidget` stays decoupled from
    `epub_io`; the app passes it plain `(index, label)` pairs)
    `epub_io` → `ebooklib`/`bs4` only; never Qt, `app`, `worker`, or `settings`
@@ -60,6 +65,8 @@ boundaries, processed independently, and rejoined.
    Never import `app` or `worker` from `widgets` or `settings`.
    `app.py` must not import `tts` — it checks Kokoro availability cheaply
    via `importlib.util.find_spec("kokoro")` to avoid loading torch at startup.
+   `app.py` must not import `llm` either — it checks mlx availability cheaply
+   via `importlib.util.find_spec("mlx_lm")`.
 
 2. **All colours come from `bookweaver.json` via `settings.py`.**
    Never hardcode hex values anywhere else.
@@ -82,8 +89,6 @@ boundaries, processed independently, and rejoined.
 All user-editable values live in `bookweaver.json`:
 
 - `colors` — hex values for the full colour palette
-- `models` — list of `{label, value}` objects for the model dropdown
-- `default_model` — value string of the default selection
 - `ollama_timeout` — default timeout in seconds (overridable per-run in the UI)
 - `chapter_title_preview_chars` — fallback title length (default 50): when a
   chapter has no TOC title or heading, its title is the first N characters of
@@ -94,6 +99,17 @@ All user-editable values live in `bookweaver.json`:
   body has a scene break)
 - `voices` — per-language (`es`/`en`) lists of `{label, value}` Kokoro voices
   for the voice dropdown; adding/removing a voice is a JSON edit, no code change
+- `llm_backend` — `"mlx"` (default, in-process mlx-lm/mlx-vlm on Apple
+  silicon) or `"ollama"` (local Ollama server). JSON-only switch, no UI.
+- `mlx_max_tokens` — per-call output cap for the mlx backend (default 8192);
+  the mlx substitute for a timeout (in-process generation can't be aborted)
+- `models` / `default_model` — now per-backend dicts keyed `"mlx"` /
+  `"ollama"`; `settings.py` flattens the active backend's entries into
+  `SETTINGS["models"]` / `SETTINGS["default_model"]`, so the UI only ever
+  sees the active list. mlx values are Hugging Face repo ids
+  (`mlx-community/*`, instruction-tuned conversions only); ollama values
+  are Ollama tags. The legacy flat-list schema still parses (implies
+  `llm_backend: "ollama"`).
 
 `settings.py` loads this at import time via `_build()`, which populates all
 `C_*` colour constants, builds `STYLESHEET`, populates `SETTINGS`, and sets
@@ -119,6 +135,7 @@ All user-editable values live in `bookweaver.json`:
 | `voice` | `str \| None` | Kokoro voice id (e.g. `"ef_dora"`); `None` when MP3 is off |
 | `carry_mode` | `str` | `"off"` (default), `"glossary"`, `"prose"`, or `"both"` — cross-chunk continuity. `glossary` only affects chapters split into multiple chunks; `prose`/`both` also hard-segment any chapter at scene breaks, which can turn a single-chunk chapter into several (see below) |
 | `target_lang` | `str` | `"es"` or `"en"` — from `TARGET_LANG[mode]` in `settings.py`; selects the voice list and Kokoro language |
+| `backend` | `str` | `"mlx"` or `"ollama"` — captured from `SETTINGS["llm_backend"]` at start time so resume never flips backends mid-book |
 
 ### Per chapter
 
@@ -271,6 +288,15 @@ explicitly. This is intentional to prevent silent wrong values.
 Full translation mode generates more tokens than the summarise pipeline and
 may require a higher timeout, especially for large chapters.
 
+The timeout applies to the **Ollama backend only**. The mlx backend runs
+in-process and cannot abort a generation midway; runaway output is bounded
+by `mlx_max_tokens` instead, and the timeout spinbox is disabled in the UI
+when `llm_backend` is `"mlx"`. The mlx model loads lazily on the first call
+of a run (~7 s from a warm HF cache) and is **released after every run**
+(`llm.unload()` in `run()`'s `finally`). Known trade-off vs Ollama: a
+Metal/MLX fault can take down the whole app process; per-chapter txt files
+limit the loss to the in-flight chapter.
+
 ---
 
 ## Known historical issues
@@ -289,6 +315,8 @@ Expected output:
 ```
 app.py:    class BookWeaverApp(QMainWindow)
 epub_io.py: class Chapter
+llm.py:     class _MlxLmRuntime
+llm.py:     class _MlxVlmRuntime
 widgets.py: class SummarizationSlider(QWidget)
 widgets.py: class CreativitySlider(QWidget)
 widgets.py: class FilePickerRow(QWidget)
@@ -312,10 +340,12 @@ pytest -q        # quiet output
 ```
 
 Tested modules: `prompts.py`, `settings.py`, `worker.py` (pure functions and
-file I/O), `tts.py` (import gate and pure helpers only). The Qt pipeline,
-full Ollama integration, and real Kokoro synthesis are not unit-tested —
-`conftest.py` also stubs the optional TTS packages (but never `numpy`:
-`pytest.approx` inspects `sys.modules["numpy"]` and an empty stub breaks it).
+file I/O), `tts.py` (import gate and pure helpers only), `llm.py` (import
+gate and pure helpers only). The Qt pipeline, full Ollama integration, real
+Kokoro synthesis, and real mlx-lm/mlx-vlm generation are not unit-tested —
+`conftest.py` also stubs the optional TTS packages and the optional mlx
+packages (but never `numpy`: `pytest.approx` inspects `sys.modules["numpy"]`
+and an empty stub breaks it).
 
 One pre-existing failure exists in `test_settings.py::TestOllamaTimeout::test_defaults_when_missing`
 — the test asserts a default of `600` but `settings.py` has always defaulted
@@ -372,4 +402,5 @@ output regardless of any percentage instruction.
 
 - `E221` (aligned assignments) is suppressed — intentional for colour/config blocks.
 - Max line length is 100.
-- Run `pycodestyle --statistics *.py` to check.
+- Settings live in `.pycodestyle`; pycodestyle 2.14 does not auto-read it, so
+  always pass it explicitly: `pycodestyle --config=.pycodestyle --statistics *.py`.
