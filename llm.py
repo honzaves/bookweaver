@@ -238,26 +238,30 @@ def _mlx_generate(
 ) -> str | None:
     def body() -> str | None:
         try:
-            runtime = _get_runtime(model, log)
-        except Exception as exc:  # import / download / load / arch failure
-            log(MLX_INSTALL_HINT.format(reason=exc), "error")
-            return None
-        log(f"   ↳ Calling {model} (temp={temperature})…", "muted")
-        t0 = time.monotonic()
-        try:
-            text = runtime.generate_text(prompt, temperature, max_tokens, log)
-        except Exception as exc:
+            try:
+                runtime = _get_runtime(model, log)
+            except Exception as exc:  # import / download / load / arch failure
+                log(MLX_INSTALL_HINT.format(reason=exc), "error")
+                return None
+            log(f"   ↳ Calling {model} (temp={temperature})…", "muted")
+            t0 = time.monotonic()
+            try:
+                text = runtime.generate_text(prompt, temperature, max_tokens, log)
+            except Exception as exc:
+                log(f"   MLX error ({label}): {exc}", "error")
+                return None
+            text = _strip_thinking_channel(text or "").strip()
+            if not text:
+                log(f"   ⚠️  Empty response for {label}", "warning")
+                return None
+            log(
+                f"   ✓  {label}: {len(text.split())} words generated "
+                f"({time.monotonic() - t0:.0f}s).", "muted",
+            )
+            return text
+        except Exception as exc:  # any post-generation failure — never escape
             log(f"   MLX error ({label}): {exc}", "error")
             return None
-        text = _strip_thinking_channel(text or "").strip()
-        if not text:
-            log(f"   ⚠️  Empty response for {label}", "warning")
-            return None
-        log(
-            f"   ✓  {label}: {len(text.split())} words generated "
-            f"({time.monotonic() - t0:.0f}s).", "muted",
-        )
-        return text
 
     return _MLX_THREAD.submit(body).result()
 

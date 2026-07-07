@@ -67,7 +67,7 @@ class ProcessingWorker(QThread):
         self.failed_at_chapter: int = 0
 
     def abort(self) -> None:
-        """Request a clean stop after the current Ollama call."""
+        """Request a clean stop after the current LLM call."""
         self._abort = True
 
     # ── main entry point ──────────────────────────────────────

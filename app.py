@@ -681,6 +681,13 @@ class BookWeaverApp(QMainWindow):
     # ──────────────────────────────────────────────────────────────────
     def _start_worker(self, cfg: dict) -> None:
         self._set_running(True)
+        # A finishing worker may still be inside run()'s finally (mlx unload
+        # releases a multi-GB model after `finished` is emitted). Rebinding
+        # self._worker while its QThread is still executing would let Python
+        # GC destroy a running QThread → qFatal. Wait for the prior run's
+        # thread to actually return first.
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.wait()
         self._worker = ProcessingWorker(cfg)
         self._worker.log.connect(lambda msg, lvl: self._log.append_line(msg, lvl))
         self._worker.progress.connect(self._on_progress)
