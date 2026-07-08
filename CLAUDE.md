@@ -37,6 +37,11 @@ boundaries, processed independently, and rejoined.
 | `prompts.py` | All LLM prompt strings, incl. `build_context_block` (continuity) | For prompt tuning |
 | `llm.py` | LLM backends — in-process mlx-lm/mlx-vlm (default) and local Ollama; lazy optional imports, Qt-free | For backend/LLM-call changes |
 | `widgets.py` | All reusable Qt widgets | For new/changed widgets |
+| `wizard.py` | **New wizard frontend** entry point + shell (`python wizard.py`). Coexists with `main.py`/`app.py` | For wizard shell/nav changes |
+| `wizard_theme.py` | Wizard palette (`wizard_colors` in JSON), stylesheet, Caveat font | For wizard styling |
+| `wizard_logic.py` | Pure, Qt-free wizard state + the 22-key `build_config` worker contract | For wizard behaviour changes |
+| `wizard_widgets.py` | Wizard's custom-painted widgets (sliders, tiles, rail, console) | For new/changed wizard widgets |
+| `wizard_steps.py` | One QWidget per wizard step | For step content changes |
 | `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
 | `tts.py` | Kokoro TTS → MP3 audiobook with ID3 chapters; optional deps behind an import gate | For TTS/audio changes |
 | `bookweaver.json` | All user-editable settings: colours, models, timeout, TTS voices | User edits; no code changes |
@@ -297,6 +302,12 @@ of a run (~7 s from a warm HF cache) and is **released after every run**
 Metal/MLX fault can take down the whole app process; per-chapter txt files
 limit the loss to the in-flight chapter.
 
+**`max_tokens` is now a per-run config key:** `ProcessingWorker` honours
+`config["max_tokens"]`, falling back to `SETTINGS["mlx_max_tokens"]` from
+`bookweaver.json`. The wizard frontend exposes it as a spinbox in Step 3
+(mlx backend only), while the original `app.py` never sets it and keeps the
+JSON default.
+
 ---
 
 ## Known historical issues
@@ -313,18 +324,37 @@ grep -n "^class " *.py
 Expected output:
 
 ```
-app.py:    class BookWeaverApp(QMainWindow)
-epub_io.py: class Chapter
-llm.py:     class _MlxLmRuntime
-llm.py:     class _MlxVlmRuntime
-widgets.py: class SummarizationSlider(QWidget)
-widgets.py: class CreativitySlider(QWidget)
-widgets.py: class FilePickerRow(QWidget)
-widgets.py: class FolderPickerRow(QWidget)
-widgets.py: class LogWidget(QTextEdit)
-widgets.py: class ProgressBar(QWidget)
-widgets.py: class ChapterListWidget(QWidget)
-worker.py:  class ProcessingWorker(QThread)
+app.py:59:class BookWeaverApp(QMainWindow):
+epub_io.py:40:class Chapter:
+llm.py:133:class _MlxLmRuntime:
+llm.py:155:class _MlxVlmRuntime:
+widgets.py:52:class SummarizationSlider(QWidget):
+widgets.py:121:class CreativitySlider(QWidget):
+widgets.py:202:class FilePickerRow(QWidget):
+widgets.py:248:class FolderPickerRow(QWidget):
+widgets.py:286:class LogWidget(QTextEdit):
+widgets.py:314:class ProgressBar(QWidget):
+widgets.py:358:class ChapterListWidget(QWidget):
+wizard.py:36:class WizardWindow(QMainWindow):
+wizard_logic.py:76:class ChapterRow:
+wizard_logic.py:93:class WizardState:
+wizard_steps.py:48:class StepBook(QWidget):
+wizard_steps.py:175:class _Reveal:
+wizard_steps.py:250:class StepTransform(QWidget):
+wizard_steps.py:405:class StepOutput(QWidget):
+wizard_steps.py:643:class StepRun(QWidget):
+wizard_widgets.py:32:class Card(QFrame):
+wizard_widgets.py:63:class Note(QFrame):
+wizard_widgets.py:81:class _ProgressPill(QWidget):
+wizard_widgets.py:111:class RunConsole(QWidget):
+wizard_widgets.py:164:class _SliderTrack(QWidget):
+wizard_widgets.py:180:class WizardSlider(QWidget):
+wizard_widgets.py:345:class _ClickableLabel(QLabel):
+wizard_widgets.py:354:class _ClickableTile(QFrame):
+wizard_widgets.py:366:class StepRail(QWidget):
+wizard_widgets.py:440:class ModeTileGrid(QWidget):
+wizard_widgets.py:507:class TriStateChapterList(QWidget):
+worker.py:37:class ProcessingWorker(QThread):
 ```
 
 ---
