@@ -8,7 +8,8 @@ settings.py — that module's _build() runs at import time and populates the
 *old* UI's globals. Keeping the loaders separate keeps the two themes from
 sharing mutable state.
 
-Imports stdlib + PyQt6.QtGui only. Never settings, never app, never worker.
+Imports stdlib at module scope; PyQt6.QtGui is imported lazily if needed.
+Never settings, never app, never worker.
 """
 
 import json
@@ -223,6 +224,10 @@ QCheckBox::indicator:indeterminate {{
 }}
 QCheckBox::indicator:disabled {{ border-color: {W_BORDER}; background: {W_WINDOW_BG}; }}
 
+QScrollArea#contentArea {{
+    background: transparent;
+    border: none;
+}}
 QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
 QScrollBar::handle:vertical {{
