@@ -22,6 +22,43 @@
     "sweet":     "#7aab6e"
   },
 
+  "wizard_colors": {
+    "app_bg":            "#0a0a08",
+    "window_bg":         "#111210",
+    "surface":           "#1a1b18",
+    "inset":             "#0f0f0c",
+    "console_bg":        "#0c0c09",
+    "footer_bg":         "#16160f",
+    "border":            "#2e2f2a",
+    "border_input":      "#36372f",
+    "border_strong":     "#3a3b34",
+    "border_ctrl":       "#4a4b42",
+    "amber":             "#d4a853",
+    "amber_hover":       "#deb469",
+    "amber_dim":         "#8a6a2e",
+    "text":              "#e8e4d9",
+    "text_secondary":    "#cfc9ba",
+    "muted":             "#7a7870",
+    "muted2":            "#8a8678",
+    "faint":             "#6c6a62",
+    "faint2":            "#55564d",
+    "success":           "#7aab6e",
+    "warning":           "#c98d3a",
+    "error":             "#c0604a",
+    "tile_selected":     "#211c12",
+    "track":             "#2a2b24",
+    "knob_ring":         "#15150f",
+    "row_hover":         "#181812",
+    "fill_start":        "#5b594f",
+    "log_info":          "#9a978c",
+    "log_muted":         "#5b594f",
+    "btn_disabled_bg":   "#3a3528",
+    "btn_disabled_fg":   "#6c6453",
+    "danger_bg":         "#23130f",
+    "danger_border":     "#5a3127",
+    "badge_done_bg":     "#26271f"
+  },
+
   "models": {
     "mlx": [
       { "label": "Gemma 4 31B QAT (recommended)", "value": "mlx-community/gemma-4-31B-it-qat-8bit" },
