@@ -521,27 +521,32 @@ git commit -m "feat(wizard): WIZARD_STYLESHEET"
 - Consumes: nothing.
 - Produces: `wizard_theme.load_caveat() -> str | None` — returns the loaded family name, or `None` when the asset is absent or unparseable. Callers fall back to muted italic system font.
 
-> **Why the static instance:** Google ships `Caveat[wght].ttf` as a *variable* font. `QFontDatabase.addApplicationFont` accepts it but selecting a single weight through Qt is unreliable. Fetch the static instance instead — it lives under `ofl/caveat/static/` in the `google/fonts` repo.
+> **Verified before dispatch (2026-07-08).** `google/fonts` ships **only** the variable font
+> `ofl/caveat/Caveat[wght].ttf` — there is no `static/` subdirectory, and that path returns
+> HTTP 404. The variable font was tested against this project's PyQt6: `addApplicationFont`
+> returns id `0`, `applicationFontFamilies` returns `['Caveat', 'Caveat']` (Regular + Bold
+> instances, hence the duplicate), `QFont("Caveat").exactMatch()` is `True`, and the prompt
+> string renders 202px wide at 16pt. **The variable-font risk did not materialize; use it
+> directly.** Save it under the plain name `Caveat-Regular.ttf` — the `[wght]` brackets in the
+> upstream filename are hostile to shell globs.
 
 - [ ] **Step 1: Fetch the font and its license**
 
 ```bash
 mkdir -p assets
 curl -fL -o assets/Caveat-Regular.ttf \
-  https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/static/Caveat-Regular.ttf
+  "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf"
 curl -fL -o assets/OFL.txt \
   https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/OFL.txt
 ```
 
-Verify it is a real TrueType file, not an HTML 404 page:
+Both URLs are confirmed HTTP 200. Note `curl -f` fails loudly on 4xx rather than saving the
+error page. Verify it is a real TrueType file, not an HTML 404 page:
 
 ```bash
 file assets/Caveat-Regular.ttf
 ```
-Expected: `assets/Caveat-Regular.ttf: TrueType Font data, ...`
-
-If the `static/` path 404s, fall back to the variable font and note it:
-`curl -fL -o assets/Caveat-Regular.ttf https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf`
+Expected: `assets/Caveat-Regular.ttf: TrueType Font data, ...` (~403 KB)
 
 - [ ] **Step 2: Write the failing test**
 
@@ -595,6 +600,8 @@ def load_caveat(path: Path = CAVEAT_PATH) -> str | None:
     if font_id == -1:
         return None
     families = QFontDatabase.applicationFontFamilies(font_id)
+    # A variable font reports one family name per named instance, so Caveat
+    # comes back as ['Caveat', 'Caveat'] (Regular + Bold). Either works.
     return families[0] if families else None
 ```
 
