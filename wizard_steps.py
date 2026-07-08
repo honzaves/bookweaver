@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 
 import wizard_logic as wl
 from settings import SETTINGS, OLLAMA_TIMEOUT, voices_for_language
-from wizard_widgets import Card, ModeTileGrid, Note, TriStateChapterList, WizardSlider
+from wizard_widgets import Card, ModeTileGrid, Note, RunConsole, TriStateChapterList, WizardSlider
 
 
 def _prompt(text: str, caveat_family: str | None) -> QLabel:
@@ -638,3 +638,25 @@ class StepOutput(QWidget):
             self._mp3.isChecked() and self._mp3.isEnabled()
         )
         self.changed.emit()
+
+
+class StepRun(QWidget):
+    """Step 4 — the run console. The expanded 'drawer takes over' view."""
+
+    def __init__(self, caveat: str | None = None,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(13)
+        self.console = RunConsole()
+        layout.addWidget(self.console, 1)
+
+    def apply_to(self, state: wl.WizardState) -> None:
+        """Step 4 holds no configuration."""
+
+    def load_from(self, state: wl.WizardState) -> None:
+        """Step 4 holds no configuration."""
+
+    def set_enabled_controls(self, enabled: bool) -> None:
+        """The console is always interactive (scroll/select)."""
