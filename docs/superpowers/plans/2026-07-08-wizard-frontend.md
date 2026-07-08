@@ -1393,6 +1393,7 @@ git commit -m "feat(wizard): build_config — the 22-key worker contract"
 - Consumes: `wizard_theme.W_*`, `LOG_COLORS`.
 - Produces:
   - `Card(title: str, meta: str = "") -> QFrame` with `.body: QVBoxLayout` and `.set_meta(text: str)`
+  - `Note(text: str) -> QFrame` — a bordered info frame, no title row
   - `RunConsole(QWidget)` with `.append(msg: str, level: str = "info")`, `.clear_log()`, `.set_progress(current: int, total: int)`, `.reset()`
 
 - [ ] **Step 1: Create `wizard_widgets.py` with `Card` and `RunConsole`**
@@ -1411,6 +1412,7 @@ subclassed here.
 """
 
 import html
+from dataclasses import replace
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
@@ -1456,6 +1458,24 @@ class Card(QFrame):
 
     def set_meta(self, text: str) -> None:
         self._meta.setText(text)
+
+
+class Note(QFrame):
+    """A bordered info frame: one word-wrapped helper line, no title row.
+
+    Distinct from Card because a Card always carries an uppercase title
+    label; an empty one would leave a phantom row in every note.
+    """
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("note")
+        box = QVBoxLayout(self)
+        box.setContentsMargins(12, 10, 12, 10)
+        label = QLabel(text)
+        label.setObjectName("helper")
+        label.setWordWrap(True)
+        box.addWidget(label)
 
 
 class _ProgressPill(QWidget):
@@ -1549,25 +1569,26 @@ QT_QPA_PLATFORM=offscreen python - <<'EOF'
 from PyQt6.QtWidgets import QApplication
 import sys
 app = QApplication(sys.argv)
-from wizard_widgets import Card, RunConsole
+from wizard_widgets import Card, Note, RunConsole
 c = Card("Chapters", "11 / 11 selected"); c.set_meta("3 / 11 selected")
+n = Note("ℹ️  Character names are never translated.")
 rc = RunConsole()
 rc.append("Chapter 3.1/4  rewriting…", "info")
 rc.append("✓ saved chapter 19", "success")
 rc.append("✗ failed", "error")
 rc.append("unknown-level line", "bogus")     # must not raise
 rc.set_progress(47, 100)
-print("Card + RunConsole OK")
+print("Card + Note + RunConsole OK")
 EOF
 ```
-Expected: `Card + RunConsole OK`
+Expected: `Card + Note + RunConsole OK`
 
 - [ ] **Step 3: Lint and commit**
 
 ```bash
 pycodestyle --config=.pycodestyle --statistics wizard_widgets.py
 git add wizard_widgets.py
-git commit -m "feat(wizard): Card + RunConsole widgets"
+git commit -m "feat(wizard): Card, Note, RunConsole widgets"
 ```
 
 ---
@@ -1591,6 +1612,22 @@ Design: 6px track radius 99, tick marks, 17px amber knob with a 2px `#15150f` ri
 Add `QSlider` to the `QtWidgets` import list at the top of the file.
 
 ```python
+class _SliderTrack(QWidget):
+    """Paint surface for WizardSlider. Delegates painting to its owner.
+
+    A subclass rather than a monkeypatched paintEvent: assigning onto the
+    instance defeats Qt's C++ virtual dispatch in some builds and is opaque
+    to type checkers.
+    """
+
+    def __init__(self, painter, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._painter = painter
+
+    def paintEvent(self, _event) -> None:          # noqa: N802 (Qt naming)
+        self._painter()
+
+
 class WizardSlider(QWidget):
     """Custom-painted slider with a live readout and sweet-spot pill.
 
@@ -1615,7 +1652,7 @@ class WizardSlider(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self._track_area = QWidget()
+        self._track_area = _SliderTrack(self._paint_track)
         self._track_area.setFixedHeight(self._ROW_H)
         layout.addWidget(self._track_area)
 
@@ -1660,7 +1697,6 @@ class WizardSlider(QWidget):
         legend_lbl.setObjectName("helper")
         layout.addWidget(legend_lbl)
 
-        self._track_area.paintEvent = self._paint_track   # type: ignore[method-assign]
         self._on_change(default)
 
     # ── constructors ──
@@ -1716,7 +1752,8 @@ class WizardSlider(QWidget):
         self._track_area.update()
         self.valueChanged.emit(v)
 
-    def _paint_track(self, _event) -> None:
+    def _paint_track(self) -> None:
+        """Called by _SliderTrack.paintEvent. Draws track, ticks, fill, knob."""
         p = QPainter(self._track_area)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = self._track_area.rect()
@@ -1808,6 +1845,24 @@ git commit -m "feat(wizard): custom-painted WizardSlider with sweet-spot pill"
 Add `QButtonGroup, QCheckBox, QRadioButton, QScrollArea, QGridLayout` to the `QtWidgets` import list.
 
 ```python
+class _ClickableLabel(QLabel):
+    """A QLabel that emits clicked. Used for the step-rail badges + labels."""
+
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, _event) -> None:     # noqa: N802 (Qt naming)
+        self.clicked.emit()
+
+
+class _ClickableTile(QFrame):
+    """A QFrame that emits clicked. Used for the mode tiles."""
+
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, _event) -> None:     # noqa: N802 (Qt naming)
+        self.clicked.emit()
+
+
 _STEP_LABELS = ("Book", "Transform", "Output", "Run")
 
 
@@ -1821,17 +1876,17 @@ class StepRail(QWidget):
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(9)
-        self._badges: list[QLabel] = []
-        self._labels: list[QLabel] = []
+        self._badges: list[_ClickableLabel] = []
+        self._labels: list[_ClickableLabel] = []
         for i, name in enumerate(_STEP_LABELS, start=1):
-            badge = QLabel(str(i))
+            badge = _ClickableLabel(str(i))
             badge.setFixedSize(23, 23)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setCursor(Qt.CursorShape.PointingHandCursor)
-            badge.mousePressEvent = self._clicker(i)      # type: ignore[method-assign]
-            label = QLabel(name)
+            badge.clicked.connect(lambda s=i: self.stepClicked.emit(s))
+            label = _ClickableLabel(name)
             label.setCursor(Qt.CursorShape.PointingHandCursor)
-            label.mousePressEvent = self._clicker(i)      # type: ignore[method-assign]
+            label.clicked.connect(lambda s=i: self.stepClicked.emit(s))
             self._badges.append(badge)
             self._labels.append(label)
             row.addWidget(badge)
@@ -1842,11 +1897,6 @@ class StepRail(QWidget):
                 line.setStyleSheet(f"color:{W_BORDER};")
                 row.addWidget(line, 1)
         self.set_state(1, set(), set())
-
-    def _clicker(self, step: int):
-        def handler(_event):
-            self.stepClicked.emit(step)
-        return handler
 
     def set_state(self, current: int, completed: set[int],
                   errors: set[int]) -> None:
@@ -1900,11 +1950,11 @@ class ModeTileGrid(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(10)
         self._group = QButtonGroup(self)
-        self._tiles: dict[str, QFrame] = {}
+        self._tiles: dict[str, _ClickableTile] = {}
         self._radios: dict[str, QRadioButton] = {}
 
         for i, (key, title, desc) in enumerate(_MODE_TILES):
-            tile = QFrame()
+            tile = _ClickableTile()
             tile.setCursor(Qt.CursorShape.PointingHandCursor)
             box = QVBoxLayout(tile)
             box.setContentsMargins(12, 11, 12, 11)
@@ -1923,16 +1973,11 @@ class ModeTileGrid(QWidget):
             radio.toggled.connect(
                 lambda checked, k=key: checked and self._select(k)
             )
-            tile.mousePressEvent = self._clicker(key)     # type: ignore[method-assign]
+            tile.clicked.connect(lambda k=key: self._radios[k].setChecked(True))
 
         self._mode = "sr"
         self._radios["sr"].setChecked(True)
         self._restyle()
-
-    def _clicker(self, key: str):
-        def handler(_event):
-            self._radios[key].setChecked(True)
-        return handler
 
     def _select(self, key: str) -> None:
         if key == self._mode:
@@ -1993,7 +2038,9 @@ class TriStateChapterList(QWidget):
         )
         layout.addWidget(scroll)
 
-        self._boxes: list[tuple[int, QCheckBox]] = []
+        # Store the ChapterRow itself, never re-parse it out of the label:
+        # the display format ("01.  Title") must not be load-bearing data.
+        self._boxes: list[tuple[wl.ChapterRow, QCheckBox]] = []
 
     def clear(self) -> None:
         for _, box in self._boxes:
@@ -2009,14 +2056,12 @@ class TriStateChapterList(QWidget):
             box.setStyleSheet(f"QCheckBox:hover {{ background:{W_ROW_HOVER}; }}")
             box.stateChanged.connect(self._on_child_changed)
             self._inner_layout.insertWidget(self._inner_layout.count() - 1, box)
-            self._boxes.append((row.index, box))
+            self._boxes.append((row, box))
         self._sync_master()
 
     def rows(self) -> list["wl.ChapterRow"]:
-        return [
-            wl.ChapterRow(idx, box.text().split(".", 1)[1].strip(), box.isChecked())
-            for idx, box in self._boxes
-        ]
+        return [replace(row, checked=box.isChecked())
+                for row, box in self._boxes]
 
     def _on_master_clicked(self) -> None:
         # A tri-state master must drive children to a definite state, never
@@ -2324,7 +2369,7 @@ from PyQt6.QtCore import (
     QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, Qt, pyqtSignal,
 )
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QRadioButton, QButtonGroup
-from wizard_widgets import Card, ModeTileGrid, TriStateChapterList, WizardSlider
+from wizard_widgets import Card, ModeTileGrid, Note, TriStateChapterList, WizardSlider
 ```
 
 ```python
@@ -2442,11 +2487,11 @@ class StepTransform(QWidget):
         layout.addLayout(slider_row)
 
         # ── mode-conditional notes ──
-        self._translate_note = self._note(
+        self._translate_note = Note(
             "⚠️  Full text is translated directly — expect longer model calls. "
             "Consider raising the timeout in step 3."
         )
-        self._sum_note = self._note(
+        self._sum_note = Note(
             "ℹ️  Output stays in English; no translation is performed."
         )
         layout.addWidget(self._translate_note)
@@ -2506,15 +2551,6 @@ class StepTransform(QWidget):
             "level":     _Reveal(self._level_card),
         }
         self._sync_reveals(animate=False)
-
-    def _note(self, text: str) -> QWidget:
-        frame = Card("")
-        frame.setObjectName("note")
-        lbl = QLabel(text)
-        lbl.setObjectName("helper")
-        lbl.setWordWrap(True)
-        frame.body.addWidget(lbl)
-        return frame
 
     # ── public API ──
     def apply_to(self, state: wl.WizardState) -> None:
@@ -2758,16 +2794,10 @@ class StepOutput(QWidget):
         adv_row.addWidget(chunk_card, 1)
         layout.addLayout(adv_row)
 
-        names_note = Card("")
-        names_note.setObjectName("note")
-        names_lbl = QLabel(
+        layout.addWidget(Note(
             "ℹ️  Character names and place names are never translated — "
             "passed through to the model exactly as written."
-        )
-        names_lbl.setObjectName("helper")
-        names_lbl.setWordWrap(True)
-        names_note.body.addWidget(names_lbl)
-        layout.addWidget(names_note)
+        ))
         layout.addStretch()
 
         self._meta_reveal = _Reveal(self._meta_card)
