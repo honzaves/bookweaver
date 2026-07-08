@@ -15,7 +15,8 @@
 - **Never modify** `app.py`, `widgets.py`, `main.py`. They must keep working unchanged.
 - **Never hardcode a hex color** outside `bookweaver.json`. (CLAUDE.md rule #2.)
 - Branch: `main`. Every commit must leave both `python main.py` and `python wizard.py` runnable.
-- Max line length **100**. Lint with `pycodestyle --config=.pycodestyle --statistics *.py` (pycodestyle 2.14 does not auto-read the file — pass `--config` explicitly).
+- Max line length **100**. Lint with `pycodestyle --config=.pycodestyle --statistics <file>` (pycodestyle 2.14 does not auto-read the file — pass `--config` explicitly).
+- **The repo is NOT lint-clean and never was.** Known pre-existing baseline: 7×`E241` in `settings.py`, 1×`E501` + 4×`W503` in `worker.py`. Do **not** fix these, and do **not** widen `.pycodestyle`'s ignore list to hide them. Each NEW wizard file must be individually clean: `pycodestyle --config=.pycodestyle wizard_*.py`. Avoid column-aligned dict literals in new code (they trigger `E241`, which is not suppressed); aligned `=` assignments are fine (`E221` is suppressed).
 - `wizard_logic.py` imports **only** stdlib + `settings` (`creativity_to_temperature`, `TARGET_LANG`). Never Qt. Never `wizard_theme`. It **never returns a hex color** — only ramp keys `"muted" | "neutral" | "green" | "warning" | "error"`.
 - `wizard_theme.py` imports stdlib + `PyQt6.QtGui` only. It loads `bookweaver.json` with its own `json.load` — never imports `settings`.
 - `wizard.py` must not import `tts` (probe Kokoro via `importlib.util.find_spec("kokoro")`) and must not import `llm` (probe via `find_spec("mlx_lm")`). Importing them loads torch / mlx at startup.
@@ -3539,14 +3540,14 @@ Run:
 ```bash
 grep -n "^class " *.py
 pytest -q
-pycodestyle --config=.pycodestyle --statistics *.py
+pycodestyle --config=.pycodestyle wizard*.py    # new files: must be clean
 QT_QPA_PLATFORM=offscreen python -c "
 import sys; from PyQt6.QtWidgets import QApplication; a=QApplication(sys.argv)
 import app, wizard
 app.BookWeaverApp(); wizard.WizardWindow()
 print('both frontends construct')"
 ```
-Expected: `pytest` shows exactly 1 failure (`test_settings.py::TestOllamaTimeout::test_defaults_when_missing`, pre-existing); `pycodestyle` clean; `both frontends construct`.
+Expected: `pytest` shows exactly 1 failure (`test_settings.py::TestOllamaTimeout::test_defaults_when_missing`, pre-existing); `pycodestyle wizard*.py` clean (repo total still shows the known E241/E501/W503 baseline); `both frontends construct`.
 
 - [ ] **Step 4: End-to-end acceptance run (manual, requires a real EPUB)**
 
