@@ -97,3 +97,137 @@ LOG_COLORS: dict[str, str] = {
     "warning": W_WARNING,
     "error": W_ERROR,
 }
+
+_MONO = '"SF Mono", ui-monospace, Menlo, monospace'
+_SANS = '-apple-system, "Helvetica Neue", Helvetica, system-ui, sans-serif'
+
+WIZARD_STYLESHEET = f"""
+QMainWindow, QWidget {{
+    background-color: {W_WINDOW_BG};
+    color: {W_TEXT};
+    font-family: {_SANS};
+    font-size: 13px;
+}}
+QLabel {{ background: transparent; color: {W_TEXT}; }}
+
+QLabel#appTitle {{
+    color: {W_AMBER}; font-size: 19px; font-weight: 700; letter-spacing: -0.5px;
+}}
+QLabel#appSubtitle {{ color: {W_MUTED}; font-size: 12px; }}
+QLabel#recapLine   {{ color: {W_FAINT}; font-size: 11px; }}
+QLabel#stepPrompt  {{ color: {W_AMBER_DIM}; font-size: 16px; }}
+QLabel#helper      {{ color: {W_MUTED}; font-size: 11px; }}
+QLabel#cardMeta    {{ color: {W_MUTED}; font-family: {_MONO}; font-size: 11px; }}
+QLabel#cardTitle   {{
+    color: {W_MUTED2}; font-size: 10px; font-weight: 600; letter-spacing: 1.4px;
+}}
+
+QFrame#amberRule {{ border: none; background: {W_AMBER}; max-height: 2px; }}
+
+QFrame#card {{
+    background-color: {W_SURFACE};
+    border: 1px solid {W_BORDER};
+    border-radius: 9px;
+}}
+QFrame#note {{
+    background-color: {W_INSET};
+    border: 1px solid {W_BORDER};
+    border-radius: 7px;
+}}
+
+QLineEdit, QComboBox, QSpinBox {{
+    background-color: {W_INSET};
+    border: 1px solid {W_BORDER_INPUT};
+    border-radius: 7px;
+    padding: 9px 11px;
+    color: {W_TEXT};
+    font-family: {_MONO};
+    font-size: 12px;
+    selection-background-color: {W_AMBER_DIM};
+}}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {W_AMBER}; }}
+QComboBox:hover, QSpinBox:hover {{ border-color: {W_FAINT2}; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox::down-arrow {{
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {W_MUTED};
+    margin-right: 7px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {W_SURFACE};
+    border: 1px solid {W_BORDER};
+    selection-background-color: {W_AMBER_DIM};
+    color: {W_TEXT};
+    padding: 4px;
+}}
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
+    color: {W_BTN_DISABLED_FG};
+    border-color: {W_BORDER};
+}}
+
+QPushButton {{
+    background: transparent;
+    border: 1px solid {W_BORDER_STRONG};
+    border-radius: 7px;
+    padding: 8px 13px;
+    color: {W_TEXT_SECONDARY};
+}}
+QPushButton:hover {{ border-color: {W_FAINT2}; color: {W_TEXT}; }}
+
+QPushButton#primaryBtn {{
+    background-color: {W_AMBER}; border: none;
+    color: {W_WINDOW_BG}; font-weight: 600;
+}}
+QPushButton#primaryBtn:hover    {{ background-color: {W_AMBER_HOVER}; }}
+QPushButton#primaryBtn:disabled {{
+    background-color: {W_BTN_DISABLED_BG}; color: {W_BTN_DISABLED_FG};
+}}
+
+QPushButton#dangerBtn {{
+    background-color: {W_DANGER_BG};
+    border: 1px solid {W_DANGER_BORDER};
+    color: {W_ERROR};
+}}
+QPushButton#dangerBtn:disabled {{ color: {W_DANGER_BORDER}; }}
+
+QPushButton#ghostBtn {{ background: transparent; border: none; color: {W_MUTED}; }}
+QPushButton#ghostBtn:hover {{ color: {W_TEXT}; }}
+
+QWidget#footer {{
+    background-color: {W_FOOTER_BG};
+    border-top: 1px solid {W_BORDER};
+}}
+
+QTextEdit#logView {{
+    background-color: {W_CONSOLE_BG};
+    border: 1px solid {W_BORDER};
+    border-radius: 9px;
+    padding: 13px 15px;
+    color: {W_LOG_INFO};
+    font-family: {_MONO};
+    font-size: 12px;
+}}
+
+QCheckBox, QRadioButton {{ spacing: 8px; color: {W_TEXT}; background: transparent; }}
+QCheckBox::indicator {{
+    width: 17px; height: 17px; border-radius: 5px;
+    border: 1.5px solid {W_BORDER_CTRL}; background: {W_INSET};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {W_AMBER}; border-color: {W_AMBER};
+}}
+QCheckBox::indicator:indeterminate {{
+    background-color: {W_BTN_DISABLED_BG}; border-color: {W_AMBER_DIM};
+}}
+QCheckBox::indicator:disabled {{ border-color: {W_BORDER}; background: {W_WINDOW_BG}; }}
+
+QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
+QScrollBar::handle:vertical {{
+    background: {W_AMBER_DIM}; border-radius: 5px; min-height: 30px;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
+"""

@@ -64,3 +64,24 @@ class TestMissingBlock:
         bad.write_text(json.dumps({"colors": {}}))
         with pytest.raises(SystemExit):
             wizard_theme._load_wizard_colors(bad)
+
+
+class TestStylesheet:
+    def test_is_a_nonempty_string(self):
+        assert isinstance(wizard_theme.WIZARD_STYLESHEET, str)
+        assert len(wizard_theme.WIZARD_STYLESHEET) > 500
+
+    def test_contains_no_unresolved_fstring_braces(self):
+        assert "{W_" not in wizard_theme.WIZARD_STYLESHEET
+
+    def test_references_the_wizard_palette_not_the_old_one(self):
+        ss = wizard_theme.WIZARD_STYLESHEET
+        assert wizard_theme.W_WINDOW_BG in ss     # #111210
+        assert wizard_theme.W_FOOTER_BG in ss     # #16160f
+        assert "#1c1d1b" not in ss                # old colors.surface
+
+    def test_defines_the_object_names_the_steps_rely_on(self):
+        ss = wizard_theme.WIZARD_STYLESHEET
+        for name in ("#appTitle", "#card", "#primaryBtn", "#dangerBtn",
+                     "#ghostBtn", "#footer", "#logView", "#recapLine"):
+            assert name in ss, f"stylesheet missing {name}"
