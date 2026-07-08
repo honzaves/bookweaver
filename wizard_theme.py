@@ -81,19 +81,19 @@ W_BADGE_DONE_BG   = _C["badge_done_bg"]
 # wizard_logic returns semantic ramp keys, never hexes. This is where they
 # become colors — the single place the two halves meet.
 RAMP: dict[str, str] = {
-    "muted":   W_MUTED,
+    "muted": W_MUTED,
     "neutral": W_TEXT_SECONDARY,
-    "green":   W_SUCCESS,
+    "green": W_SUCCESS,
     "warning": W_WARNING,
-    "error":   W_ERROR,
+    "error": W_ERROR,
 }
 
 # Exactly the five levels ProcessingWorker.log emits (worker.py:44-45).
 # The design also lists a "head" severity; nothing emits it, so it is dropped.
 LOG_COLORS: dict[str, str] = {
-    "info":    W_LOG_INFO,
-    "muted":   W_LOG_MUTED,
+    "info": W_LOG_INFO,
+    "muted": W_LOG_MUTED,
     "success": W_SUCCESS,
     "warning": W_WARNING,
-    "error":   W_ERROR,
+    "error": W_ERROR,
 }
