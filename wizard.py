@@ -242,6 +242,13 @@ class WizardWindow(QMainWindow):
     def _start_worker(self, cfg: dict) -> None:
         from worker import ProcessingWorker      # lazy: never at import time
         console = self._steps[4].console
+        # A just-finished worker may still be inside run()'s finally, where the
+        # mlx backend releases a multi-GB model after `finished` was emitted.
+        # Rebinding self._worker while that QThread is still executing would
+        # let Python GC destroy a running QThread → qFatal. Wait for the prior
+        # thread to actually return first. (Mirrors app.py._start_worker.)
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.wait()
         self._worker = ProcessingWorker(cfg)
         self._worker.log.connect(console.append)
         self._worker.progress.connect(console.set_progress)
@@ -303,7 +310,13 @@ class WizardWindow(QMainWindow):
 
     def _on_finished(self, success: bool, path: str) -> None:
         console = self._steps[4].console
-        worker, self._worker = self._worker, None
+        # Keep self._worker referenced. The QThread may still be inside run()'s
+        # finally (mlx model release) when this queued slot fires on the main
+        # thread; dropping the sole reference here would let Python GC destroy
+        # a still-running QThread → qFatal ("QThread: Destroyed while thread is
+        # still running"). The reference is retired safely in _start_worker,
+        # which wait()s before rebinding. (Mirrors app.py._on_finished.)
+        worker = self._worker
         aborting = self.state.run_state == "aborting"
 
         if success:
