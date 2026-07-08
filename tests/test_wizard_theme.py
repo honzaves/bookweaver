@@ -87,3 +87,22 @@ class TestStylesheet:
                      "#helper", "#note", "#footer", "#primaryBtn",
                      "#dangerBtn", "#ghostBtn", "#logView", "#contentArea"):
             assert name in ss, f"stylesheet missing {name}"
+
+
+class TestCaveat:
+    def test_asset_exists_and_is_truetype(self):
+        ttf = Path(__file__).parent.parent / "assets" / "Caveat-Regular.ttf"
+        assert ttf.exists(), "run the curl in Task 3 Step 1"
+        # 0x00010000 (TrueType) or "OTTO" (CFF). Never "<!DO" (an HTML 404).
+        assert ttf.read_bytes()[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true")
+
+    def test_license_is_committed(self):
+        assert (Path(__file__).parent.parent / "assets" / "OFL.txt").exists()
+
+    def test_load_caveat_returns_none_for_a_missing_file(self, tmp_path):
+        assert wizard_theme.load_caveat(tmp_path / "nope.ttf") is None
+
+    def test_load_caveat_returns_none_for_a_bogus_file(self, tmp_path):
+        bad = tmp_path / "bad.ttf"
+        bad.write_text("<!DOCTYPE html><html>404</html>")
+        assert wizard_theme.load_caveat(bad) is None

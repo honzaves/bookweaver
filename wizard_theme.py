@@ -236,3 +236,31 @@ QScrollBar::handle:vertical {{
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
 """
+
+CAVEAT_PATH = Path(__file__).parent / "assets" / "Caveat-Regular.ttf"
+
+
+def load_caveat(path: Path = CAVEAT_PATH) -> str | None:
+    """Register the decorative Caveat font; return its family name.
+
+    Returns None when the asset is missing or unparseable — a fresh clone
+    without assets/ must never crash. Callers fall back to muted italic
+    system font for the per-step prompts, which are purely cosmetic.
+    """
+    if not Path(path).exists():
+        return None
+    try:
+        from PyQt6.QtGui import QFontDatabase
+    except ImportError:
+        return None
+    try:
+        font_id = QFontDatabase.addApplicationFont(str(path))
+        if font_id == -1:
+            return None
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        # A variable font reports one family name per named instance, so Caveat
+        # comes back as ['Caveat', 'Caveat'] (Regular + Bold). Either works.
+        return families[0] if families else None
+    except (TypeError, AttributeError):
+        # Unparseable font file or Qt mocking issue.
+        return None
