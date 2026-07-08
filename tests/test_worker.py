@@ -582,3 +582,24 @@ class TestCarryContext:
     def test_both_includes_names_and_prose(self):
         block = self.call("both", "Alice and Alice again.", "prior tail here", False)
         assert "Alice" in block and "prior tail here" in block
+
+
+# ──────────────────────────────────────────────────────────────
+#  max_tokens plumbing (config override with SETTINGS fallback)
+# ──────────────────────────────────────────────────────────────
+class TestMaxTokensPlumbing:
+    def test_absent_key_falls_back_to_settings(self):
+        """app.py never sets max_tokens — it must keep the JSON default."""
+        w = _make_worker()
+        assert w._max_tokens == SETTINGS.get("mlx_max_tokens", 8192)
+
+    def test_config_key_overrides_settings(self):
+        w = _make_worker({"epub_path": "/tmp/f.epub", "max_tokens": 512})
+        assert w._max_tokens == 512
+
+    def test_llm_call_passes_the_instance_attribute(self):
+        w = _make_worker()
+        w._max_tokens = 1234
+        with patch("llm.generate", return_value="ok") as gen:
+            w._llm_call("m", "p", label="L", temperature=0.5)
+        assert gen.call_args[1]["max_tokens"] == 1234

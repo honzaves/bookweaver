@@ -62,6 +62,9 @@ class ProcessingWorker(QThread):
         self._backend = config.get(
             "backend", SETTINGS.get("llm_backend", "ollama")
         )
+        self._max_tokens = config.get(
+            "max_tokens", SETTINGS.get("mlx_max_tokens", 8192)
+        )
         # Populated during run(); readable by the app after finished(False).
         self.completed_results: list[tuple[str, str]] = []
         self.failed_at_chapter: int = 0
@@ -120,7 +123,7 @@ class ProcessingWorker(QThread):
         if self._backend == "mlx":
             self.log.emit(
                 f"ℹ️   mlx backend: timeout setting ignored; output capped "
-                f"at {SETTINGS.get('mlx_max_tokens', 8192)} tokens.",
+                f"at {self._max_tokens} tokens.",
                 "info",
             )
 
@@ -913,7 +916,7 @@ class ProcessingWorker(QThread):
             backend=self._backend,
             model=model,
             temperature=temperature,
-            max_tokens=SETTINGS.get("mlx_max_tokens", 8192),
+            max_tokens=self._max_tokens,
             timeout=self._timeout,
             label=label,
             log=self.log.emit,
