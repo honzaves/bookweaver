@@ -116,7 +116,7 @@ must not import `llm` (checks mlx via `find_spec("mlx_lm")`) — the same rules
 
 ## 4. The data contract
 
-`wizard_logic.build_config(state) -> dict` must emit **exactly** the keys
+`wizard_logic.build_config(state) -> dict` must emit **exactly** the 22 keys
 `ProcessingWorker._run()` reads. Verified against `worker.py:98-118, 146, 169,
 472, 502, 510` and `worker.py:916`.
 
@@ -145,7 +145,7 @@ must not import `llm` (checks mlx via `find_spec("mlx_lm")`) — the same rules
 | `timeout` | Step 3 stepper *or* state default | 30–3600, step 30 |
 | `max_tokens` | Step 3 stepper *or* state default | **new key** |
 
-`build_config` **always emits all 21 keys**, on both backends. Only one of
+`build_config` **always emits all 22 keys**, on both backends. Only one of
 `timeout` / `max_tokens` is surfaced as a Step-3 control at a time (§7); the
 other carries its `WizardState` default. This keeps the dict shape constant, so
 the resume spread and the key-set regression test (§8) do not have to branch on
@@ -439,13 +439,13 @@ to handle interaction and keyboard focus.
 |---|---|
 | `derive_target_is_spanish` | all 4 modes × both key-ideas languages (8) |
 | `validation_errors` | empty state; no file; no chapter ticked; no format; all-valid; combinations |
-| `build_config` | every one of the 21 keys present; mode + carry enum mappings; `target_lang` for key-ideas vs other modes; `voice is None` when mp3 off; `out_folder` fallback to `Path(epub_path).parent`; `meta_language` defaulting to `"es"` |
+| `build_config` | every one of the 22 keys present; mode + carry enum mappings; `target_lang` for key-ideas vs other modes; `voice is None` when mp3 off; `out_folder` fallback to `Path(epub_path).parent`; `meta_language` defaulting to `"es"` |
 | `resume_hint` | `"mlx"` vs `"ollama"` |
 | `creativity_notch` | all 10 notches → `(name, ramp_key)`; asserts 7–8 are `"warning"` and 9–10 are `"error"` (the design ramp, not `widgets.py`'s) |
 | `keep_pct_readout` | boundaries 10, 29, 30, 50, 51, 90 → `(text, is_sweet)` |
 | `recap_text` | partial selection; all selected; label truncation at `(`; level omitted when English output |
 
-A regression test asserting `set(build_config(state)) == EXPECTED_21_KEYS`
+A regression test asserting `set(build_config(state)) == EXPECTED_22_KEYS`
 guards the contract against silent drift.
 
 Qt painting, signal wiring, and reveal animations are not unit-tested —
