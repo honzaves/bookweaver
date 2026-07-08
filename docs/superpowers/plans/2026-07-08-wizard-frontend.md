@@ -342,8 +342,10 @@ class TestStylesheet:
 
     def test_defines_the_object_names_the_steps_rely_on(self):
         ss = wizard_theme.WIZARD_STYLESHEET
-        for name in ("#appTitle", "#card", "#primaryBtn", "#dangerBtn",
-                     "#ghostBtn", "#footer", "#logView", "#recapLine"):
+        for name in ("#appTitle", "#appSubtitle", "#amberRule", "#recapLine",
+                     "#stepPrompt", "#card", "#cardTitle", "#cardMeta",
+                     "#helper", "#note", "#footer", "#primaryBtn",
+                     "#dangerBtn", "#ghostBtn", "#logView", "#contentArea"):
             assert name in ss, f"stylesheet missing {name}"
 ```
 
@@ -482,6 +484,7 @@ QCheckBox::indicator:indeterminate {{
 }}
 QCheckBox::indicator:disabled {{ border-color: {W_BORDER}; background: {W_WINDOW_BG}; }}
 
+QScrollArea#contentArea {{ background: transparent; border: none; }}
 QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
 QScrollBar::handle:vertical {{
