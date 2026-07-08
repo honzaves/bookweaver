@@ -230,15 +230,99 @@ class WizardWindow(QMainWindow):
             self._abort.setText("Abort")
         self._resume.setVisible(self._resume_state is not None and not running)
 
-    # ── worker hooks (filled in Task 15) ──
+    # ── worker lifecycle ──
+    def _start_worker(self, cfg: dict) -> None:
+        from worker import ProcessingWorker      # lazy: never at import time
+        console = self._steps[4].console
+        self._worker = ProcessingWorker(cfg)
+        self._worker.log.connect(console.append)
+        self._worker.progress.connect(console.set_progress)
+        self._worker.finished.connect(self._on_finished)
+        self.state.run_state = "running"
+        self._go_to(4)
+        self._set_controls_enabled(False)
+        self._worker.start()
+
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        for widget in self._steps.values():
+            widget.set_enabled_controls(enabled)
+
     def _on_start(self) -> None:
-        raise NotImplementedError
+        self._collect()
+        if wl.validation_errors(self.state):
+            return                       # Start is disabled; belt and braces
+        self._resume_state = None
+        self._steps[4].console.reset()
+        # Capture the backend once, so a resume can never flip it mid-book.
+        cfg = wl.build_config(self.state, self._backend)
+        self._steps[4].console.append(
+            f"📖  Starting: {len(cfg['selected_chapters'])} chapter(s), "
+            f"mode={cfg['mode']}, backend={cfg['backend']}",
+            "muted",
+        )
+        self._start_worker(cfg)
 
     def _on_abort(self) -> None:
-        raise NotImplementedError
+        if not self._worker:
+            return
+        self._worker.abort()
+        self.state.run_state = "aborting"
+        # _abort is polled at chunk boundaries (worker.py:187,219,289,335),
+        # never mid-generation. On mlx an in-flight call cannot be
+        # interrupted, so be honest about the latency.
+        self._steps[4].console.append(
+            "·  Abort requested — will stop after the current chunk.", "muted"
+        )
+        self._sync()
 
     def _on_resume(self) -> None:
-        raise NotImplementedError
+        if not self._resume_state:
+            return
+        cfg = {
+            **self._resume_state["config"],
+            "timeout": self._steps[3].timeout_value(),
+            "max_tokens": self._steps[3].max_tokens_value(),
+            "chunk_size": self.state.chunk_words,
+            "resume_from": self._resume_state["from_chapter"],
+            "prior_results": self._resume_state["results"],
+        }
+        self._steps[4].console.append(
+            f"⏩  Resuming from chapter {self._resume_state['from_chapter'] + 1}…",
+            "info",
+        )
+        self._resume_state = None
+        self._start_worker(cfg)
+
+    def _on_finished(self, success: bool, path: str) -> None:
+        console = self._steps[4].console
+        worker, self._worker = self._worker, None
+        aborting = self.state.run_state == "aborting"
+
+        if success:
+            self.state.run_state = "success"
+            self._resume_state = None
+            console.append(f"\n🎉  All done!  Output: {path}", "success")
+        else:
+            self.state.run_state = "aborted" if aborting else "failed"
+            if not aborting:
+                console.append("\n✗  Run failed.", "error")
+            partial = list(getattr(worker, "completed_results", []) or [])
+            if partial:
+                # Aborted runs are resumable too: completed_results is
+                # populated identically on every early exit.
+                self._resume_state = {
+                    "config": worker.config,
+                    "from_chapter": worker.failed_at_chapter,
+                    "results": partial,
+                }
+                console.append(
+                    f"💾  {len(partial)} chapter(s) saved. "
+                    f"{wl.resume_hint(self._backend)}",
+                    "warning",
+                )
+
+        self._set_controls_enabled(True)
+        self._sync()
 
 
 def main() -> None:
