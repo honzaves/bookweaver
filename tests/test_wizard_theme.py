@@ -3,7 +3,10 @@ tests/test_wizard_theme.py
 --------------------------
 Palette loading and semantic maps. No Qt behaviour is exercised.
 """
+import importlib
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +15,58 @@ import wizard_theme
 
 
 CONFIG = json.loads((Path(__file__).parent.parent / "bookweaver.json").read_text())
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _real_pyqt6():
+    """Swap conftest's minimal PyQt6.QtCore stub for the real package.
+
+    conftest.py's stub guard is `if "PyQt6" in sys.modules`, not a
+    find_spec() absence check like its TTS/mlx stubs — so it replaces
+    sys.modules["PyQt6"] with a stub (QtCore only, no __path__) even when
+    real PyQt6 is installed, because nothing has imported it yet at
+    conftest collection time. That stub isn't a package, so `from
+    PyQt6.QtGui import QFontDatabase` (needed by every TestCaveat test,
+    not just the QApplication-backed one) raises ModuleNotFoundError
+    against it. Here we drop the stub and import the genuine package for
+    the duration of this module, restoring the stub afterward so
+    test_worker.py's QThread stub keeps working elsewhere in the suite.
+    """
+    saved = {name: mod for name, mod in sys.modules.items()
+             if name == "PyQt6" or name.startswith("PyQt6.")}
+    for name in saved:
+        del sys.modules[name]
+    try:
+        importlib.import_module("PyQt6.QtGui")
+    except ImportError:
+        sys.modules.update(saved)  # genuinely absent; qapp will importorskip
+    yield
+    for name in [n for n in sys.modules if n == "PyQt6" or n.startswith("PyQt6.")]:
+        del sys.modules[name]
+    sys.modules.update(saved)
+
+
+@pytest.fixture(scope="module")
+def qapp(_real_pyqt6):
+    """A headless QApplication.
+
+    Measured empirically in this environment (PyQt6 6.11 / macOS):
+    QFontDatabase.addApplicationFont segfaults without a live QApplication
+    for *any* file that actually exists — valid font or garbage bytes
+    alike. Only test_load_caveat_returns_none_for_a_missing_file skips
+    this fixture, because load_caveat's `.exists()` check returns None
+    before ever reaching the Qt call; every other test that exercises
+    load_caveat against a real file requests this fixture.
+
+    Depends on _real_pyqt6 (not just autouse) so it is guaranteed to run
+    first: pytest sets up session-scoped fixtures before module-scoped
+    autouse ones, so an implicit ordering would import-check PyQt6.QtWidgets
+    against the stub before the swap ever happened.
+    """
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QtWidgets = pytest.importorskip("PyQt6.QtWidgets")
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    yield app
 
 
 class TestPalette:
@@ -102,7 +157,10 @@ class TestCaveat:
     def test_load_caveat_returns_none_for_a_missing_file(self, tmp_path):
         assert wizard_theme.load_caveat(tmp_path / "nope.ttf") is None
 
-    def test_load_caveat_returns_none_for_a_bogus_file(self, tmp_path):
+    def test_load_caveat_returns_none_for_a_bogus_file(self, qapp, tmp_path):
         bad = tmp_path / "bad.ttf"
         bad.write_text("<!DOCTYPE html><html>404</html>")
         assert wizard_theme.load_caveat(bad) is None
+
+    def test_load_caveat_returns_the_family_name(self, qapp):
+        assert wizard_theme.load_caveat() == "Caveat"

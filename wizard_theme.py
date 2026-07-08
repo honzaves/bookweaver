@@ -243,24 +243,25 @@ CAVEAT_PATH = Path(__file__).parent / "assets" / "Caveat-Regular.ttf"
 def load_caveat(path: Path = CAVEAT_PATH) -> str | None:
     """Register the decorative Caveat font; return its family name.
 
-    Returns None when the asset is missing or unparseable — a fresh clone
+    Returns None when the asset is missing (the .exists() check) or
+    unparseable (Qt's addApplicationFont returns -1) — a fresh clone
     without assets/ must never crash. Callers fall back to muted italic
     system font for the per-step prompts, which are purely cosmetic.
+
+    Requires a live QApplication: Qt's font database reaches the platform
+    font integration and will segfault the process if none exists yet.
+    wizard.main() calls this only after constructing the QApplication.
+
+    path must be absolute — CAVEAT_PATH is. A relative path makes
+    addApplicationFont return -1, which looks identical to "unparseable".
     """
     if not Path(path).exists():
         return None
-    try:
-        from PyQt6.QtGui import QFontDatabase
-    except ImportError:
+    from PyQt6.QtGui import QFontDatabase
+    font_id = QFontDatabase.addApplicationFont(str(path))
+    if font_id == -1:
         return None
-    try:
-        font_id = QFontDatabase.addApplicationFont(str(path))
-        if font_id == -1:
-            return None
-        families = QFontDatabase.applicationFontFamilies(font_id)
-        # A variable font reports one family name per named instance, so Caveat
-        # comes back as ['Caveat', 'Caveat'] (Regular + Bold). Either works.
-        return families[0] if families else None
-    except (TypeError, AttributeError):
-        # Unparseable font file or Qt mocking issue.
-        return None
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    # A variable font reports one family name per named instance, so Caveat
+    # comes back as ['Caveat', 'Caveat'] (Regular + Bold). Either works.
+    return families[0] if families else None
