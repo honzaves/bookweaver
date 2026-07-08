@@ -16,7 +16,7 @@ module testable without a QApplication or a palette.
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from settings import creativity_to_temperature
+from settings import creativity_to_temperature, TARGET_LANG
 
 # ──────────────────────────────────────────────────────────────
 #  Vocabulary
@@ -209,3 +209,48 @@ def recap_text(state: WizardState, model_label: str) -> str:
     if derive_target_is_spanish(state.mode, state.key_ideas_lang):
         parts.append(state.cefr_level)
     return " · ".join(parts)
+
+
+def build_config(state: WizardState, backend: str) -> dict:
+    """Translate WizardState into ProcessingWorker's config dict.
+
+    Emits all 22 keys on both backends. The dict shape must never branch on
+    backend: _on_resume() spreads **config, and a shape that varies would
+    make the resume path backend-dependent. The worker simply ignores the
+    key its backend does not use (self._timeout is unread on mlx,
+    self._max_tokens on ollama).
+
+    *backend* is passed in rather than read from SETTINGS so the caller can
+    capture it once at Start and resume can never flip backends mid-book.
+    """
+    worker_mode = MODE_TO_WORKER[state.mode]
+    summary_lang = state.key_ideas_lang
+    target_lang = (
+        summary_lang if worker_mode == "summarise_key_ideas"
+        else TARGET_LANG[worker_mode]
+    )
+    return {
+        "epub_path": state.epub_path,
+        "model": state.model,
+        "backend": backend,
+        "selected_chapters": [r.index for r in state.chapters if r.checked],
+        "mode": worker_mode,
+        "level": state.cefr_level,
+        "keep_pct": state.keep_pct,
+        "creativity": state.creativity,
+        "carry_mode": CARRY_TO_WORKER[state.carry],
+        "summary_lang": summary_lang,
+        "target_lang": target_lang,
+        "out_format": [f for f in ("txt", "epub", "html")
+                       if state.formats.get(f)],
+        "out_folder": state.out_folder or str(Path(state.epub_path).parent),
+        "generate_mp3": state.mp3_enabled,
+        "voice": state.voice if state.mp3_enabled else None,
+        "meta_title": state.meta_title.strip(),
+        "meta_creator": state.meta_creator.strip(),
+        "meta_language": state.meta_language.strip() or "es",
+        "meta_contributor": state.meta_contributor.strip(),
+        "chunk_size": state.chunk_words,
+        "timeout": state.timeout_sec,
+        "max_tokens": state.max_tokens,
+    }

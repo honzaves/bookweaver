@@ -172,3 +172,114 @@ class TestRecapText:
     def test_starts_with_step_1_and_the_filename(self):
         out = wl.recap_text(_state(), self.LABEL)
         assert out.startswith("Step 1 · middlemarch.epub · ")
+
+
+# ── build_config: the contract with ProcessingWorker ───────────
+class TestBuildConfig:
+    def test_emits_exactly_the_22_contract_keys(self):
+        cfg = wl.build_config(_state(), "mlx")
+        assert set(cfg) == wl.CONFIG_KEYS
+        assert len(wl.CONFIG_KEYS) == 22
+
+    def test_key_set_is_identical_on_both_backends(self):
+        """Dict shape must not branch on backend — resume spreads **config."""
+        assert set(wl.build_config(_state(), "mlx")) == \
+               set(wl.build_config(_state(), "ollama"))
+
+    def test_covers_every_key_app_py_emits(self):
+        """The wizard is a superset of app.py's 21 keys, plus max_tokens."""
+        app_keys = {
+            "epub_path", "level", "keep_pct", "model", "backend", "out_format",
+            "out_folder", "selected_chapters", "creativity", "mode",
+            "chunk_size", "carry_mode", "meta_title", "meta_creator",
+            "meta_language", "meta_contributor", "timeout", "generate_mp3",
+            "voice", "summary_lang", "target_lang",
+        }
+        assert app_keys < wl.CONFIG_KEYS
+        assert wl.CONFIG_KEYS - app_keys == {"max_tokens"}
+
+    # ── enum translation ──
+    @pytest.mark.parametrize("ui,worker", [
+        ("sr", "summarise_rewrite"), ("full", "translate"),
+        ("sum", "summarise_only"), ("key", "summarise_key_ideas"),
+    ])
+    def test_mode_is_translated_to_the_workers_vocabulary(self, ui, worker):
+        assert wl.build_config(_state(mode=ui), "mlx")["mode"] == worker
+
+    @pytest.mark.parametrize("ui,worker", [
+        ("off", "off"), ("names", "glossary"),
+        ("tail", "prose"), ("both", "both"),
+    ])
+    def test_carry_is_translated_to_the_workers_vocabulary(self, ui, worker):
+        assert wl.build_config(_state(carry=ui), "mlx")["carry_mode"] == worker
+
+    # ── target_lang derivation ──
+    def test_target_lang_for_key_ideas_follows_the_toggle(self):
+        assert wl.build_config(
+            _state(mode="key", key_ideas_lang="en"), "mlx")["target_lang"] == "en"
+        assert wl.build_config(
+            _state(mode="key", key_ideas_lang="es"), "mlx")["target_lang"] == "es"
+
+    def test_target_lang_for_other_modes_comes_from_settings(self):
+        assert wl.build_config(_state(mode="sr"), "mlx")["target_lang"] == "es"
+        assert wl.build_config(_state(mode="full"), "mlx")["target_lang"] == "es"
+        assert wl.build_config(_state(mode="sum"), "mlx")["target_lang"] == "en"
+
+    def test_key_ideas_language_does_not_leak_into_other_modes(self):
+        cfg = wl.build_config(_state(mode="sum", key_ideas_lang="es"), "mlx")
+        assert cfg["target_lang"] == "en"
+
+    # ── the rest of the mapping ──
+    def test_selected_chapters_uses_chapter_index_not_row_position(self):
+        rows = [wl.ChapterRow(5, "F", True), wl.ChapterRow(9, "J", False),
+                wl.ChapterRow(12, "M", True)]
+        cfg = wl.build_config(_state(chapters=rows), "mlx")
+        assert cfg["selected_chapters"] == [5, 12]
+
+    def test_out_format_is_an_ordered_list(self):
+        s = _state(formats={"txt": True, "epub": False, "html": True})
+        assert wl.build_config(s, "mlx")["out_format"] == ["txt", "html"]
+
+    def test_out_folder_falls_back_to_the_books_directory(self):
+        s = _state(out_folder="")
+        assert wl.build_config(s, "mlx")["out_folder"] == "/books"
+
+    def test_voice_is_none_when_mp3_is_off(self):
+        s = _state(mp3_enabled=False, voice="ef_dora")
+        assert wl.build_config(s, "mlx")["voice"] is None
+
+    def test_voice_survives_when_mp3_is_on(self):
+        s = _state(mp3_enabled=True, voice="ef_dora")
+        assert wl.build_config(s, "mlx")["voice"] == "ef_dora"
+
+    def test_meta_language_defaults_to_es_when_blank(self):
+        assert wl.build_config(_state(meta_language="  "), "mlx")["meta_language"] == "es"
+
+    def test_meta_fields_are_flat_not_nested(self):
+        cfg = wl.build_config(_state(meta_title=" Middlemarch "), "mlx")
+        assert cfg["meta_title"] == "Middlemarch"
+        assert "epub_meta" not in cfg
+
+    def test_backend_is_the_argument_not_a_settings_read(self):
+        assert wl.build_config(_state(), "ollama")["backend"] == "ollama"
+
+    def test_both_timeout_and_max_tokens_are_always_present(self):
+        for backend in ("mlx", "ollama"):
+            cfg = wl.build_config(_state(timeout_sec=900, max_tokens=4096), backend)
+            assert cfg["timeout"] == 900
+            assert cfg["max_tokens"] == 4096
+
+    def test_chunk_words_maps_to_chunk_size(self):
+        assert wl.build_config(_state(chunk_words=1500), "mlx")["chunk_size"] == 1500
+
+
+class TestContractAgainstTheRealWorker:
+    def test_worker_accepts_a_wizard_config(self):
+        """Constructing ProcessingWorker with our dict must not KeyError."""
+        from worker import ProcessingWorker
+        cfg = wl.build_config(_state(max_tokens=2048, timeout_sec=99), "mlx")
+        w = ProcessingWorker(cfg)
+        assert w._max_tokens == 2048
+        assert w._timeout == 99
+        assert w._chunk_size == cfg["chunk_size"]
+        assert w._backend == "mlx"
