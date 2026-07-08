@@ -12,15 +12,16 @@ import importlib.util
 from pathlib import Path
 
 from PyQt6.QtCore import (
-    QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, Qt, pyqtSignal,
+    QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, pyqtSignal,
 )
 from PyQt6.QtWidgets import (
-    QButtonGroup, QComboBox, QFileDialog, QGraphicsOpacityEffect, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QRadioButton, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QFileDialog, QGraphicsOpacityEffect,
+    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton,
+    QSpinBox, QVBoxLayout, QWidget,
 )
 
 import wizard_logic as wl
-from settings import SETTINGS
+from settings import SETTINGS, OLLAMA_TIMEOUT, voices_for_language
 from wizard_widgets import Card, ModeTileGrid, Note, TriStateChapterList, WizardSlider
 
 
@@ -396,3 +397,244 @@ class StepTransform(QWidget):
         self._reveals["level"].set_visible(
             wl.derive_target_is_spanish(mode, key_lang), animate
         )
+
+
+_KOKORO_AVAILABLE = importlib.util.find_spec("kokoro") is not None
+
+
+class StepOutput(QWidget):
+    """Step 3 — formats, audio, destination, metadata, advanced."""
+
+    changed = pyqtSignal()
+
+    def __init__(self, caveat: str | None = None,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._backend = SETTINGS.get("llm_backend", "ollama")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(13)
+        layout.addWidget(_prompt("where should it land?", caveat))
+
+        # ── formats ──
+        fmt_card = Card("Output formats", "at least one")
+        fmt_row = QHBoxLayout()
+        self._fmt = {
+            "txt": QCheckBox("Plain text (.txt)"),
+            "epub": QCheckBox("EPUB (.epub)"),
+            "html": QCheckBox("HTML (.html)"),
+        }
+        self._fmt["txt"].setChecked(True)
+        for box in self._fmt.values():
+            box.stateChanged.connect(self._on_formats_changed)
+            fmt_row.addWidget(box)
+        fmt_row.addStretch()
+        fmt_card.body.addLayout(fmt_row)
+
+        self._mp3 = QCheckBox("Generate MP3 audiobook (Kokoro TTS)")
+        self._mp3.stateChanged.connect(self._on_mp3_toggled)
+        fmt_card.body.addWidget(self._mp3)
+        self._mp3_note = QLabel("")
+        self._mp3_note.setObjectName("helper")
+        fmt_card.body.addWidget(self._mp3_note)
+
+        self._voice_wrap = QWidget()
+        voice_box = QHBoxLayout(self._voice_wrap)
+        voice_box.setContentsMargins(26, 0, 0, 0)
+        voice_box.addWidget(QLabel("Voice:"))
+        self._voice = QComboBox()
+        self._voice.currentIndexChanged.connect(lambda _i: self.changed.emit())
+        voice_box.addWidget(self._voice, 1)
+        fmt_card.body.addWidget(self._voice_wrap)
+        layout.addWidget(fmt_card)
+
+        # ── output folder ──
+        folder_card = Card("Output folder")
+        folder_row = QHBoxLayout()
+        self._folder = QLineEdit()
+        self._folder.textChanged.connect(lambda _t: self.changed.emit())
+        folder_row.addWidget(self._folder, 1)
+        pick = QPushButton("Browse…")
+        pick.clicked.connect(self._browse_folder)
+        folder_row.addWidget(pick)
+        folder_card.body.addLayout(folder_row)
+        layout.addWidget(folder_card)
+
+        # ── EPUB metadata (gated on .epub) ──
+        self._meta_card = Card("EPUB metadata")
+        grid = QGridLayout()
+        grid.setSpacing(9)
+        self._meta_title = QLineEdit()
+        self._meta_creator = QLineEdit()
+        self._meta_language = QLineEdit("es")
+        self._meta_contributor = QLineEdit()
+        for col, (label, widget) in enumerate([
+            ("Title", self._meta_title), ("Author", self._meta_creator),
+        ]):
+            grid.addWidget(QLabel(label), 0, col * 2)
+            grid.addWidget(widget, 0, col * 2 + 1)
+        for col, (label, widget) in enumerate([
+            ("Language", self._meta_language),
+            ("Contributor", self._meta_contributor),
+        ]):
+            grid.addWidget(QLabel(label), 1, col * 2)
+            grid.addWidget(widget, 1, col * 2 + 1)
+        for widget in (self._meta_title, self._meta_creator,
+                       self._meta_language, self._meta_contributor):
+            widget.textChanged.connect(lambda _t: self.changed.emit())
+        self._meta_card.body.addLayout(grid)
+        layout.addWidget(self._meta_card)
+
+        # ── advanced: backend-aware stepper + chunk size ──
+        adv_row = QHBoxLayout()
+        adv_row.setSpacing(13)
+        self._timeout: QSpinBox | None = None
+        self._tokens: QSpinBox | None = None
+
+        if self._backend == "mlx":
+            tok_card = Card("Max tokens per call")
+            self._tokens = QSpinBox()
+            self._tokens.setRange(256, 65536)
+            self._tokens.setSingleStep(256)
+            self._tokens.setValue(SETTINGS.get("mlx_max_tokens", 8192))
+            self._tokens.setSuffix("  tokens")
+            self._tokens.valueChanged.connect(lambda _v: self.changed.emit())
+            tok_card.body.addWidget(self._tokens)
+            hint = QLabel("caps runaway output — mlx cannot abort mid-call")
+            hint.setObjectName("helper")
+            tok_card.body.addWidget(hint)
+            adv_row.addWidget(tok_card, 1)
+        else:
+            to_card = Card("Timeout per call")
+            self._timeout = QSpinBox()
+            self._timeout.setRange(30, 3600)
+            self._timeout.setSingleStep(30)
+            self._timeout.setValue(OLLAMA_TIMEOUT)
+            self._timeout.setSuffix("  s")
+            self._timeout.valueChanged.connect(lambda _v: self.changed.emit())
+            to_card.body.addWidget(self._timeout)
+            hint = QLabel("raise for Full translation")
+            hint.setObjectName("helper")
+            to_card.body.addWidget(hint)
+            adv_row.addWidget(to_card, 1)
+
+        chunk_card = Card("Chunk size")
+        self._chunk = QSpinBox()
+        self._chunk.setRange(200, 10000)
+        self._chunk.setSingleStep(100)
+        self._chunk.setValue(2000)
+        self._chunk.setSuffix("  words")
+        self._chunk.valueChanged.connect(lambda _v: self.changed.emit())
+        chunk_card.body.addWidget(self._chunk)
+        chunk_hint = QLabel("long chapters split & rejoin")
+        chunk_hint.setObjectName("helper")
+        chunk_card.body.addWidget(chunk_hint)
+        adv_row.addWidget(chunk_card, 1)
+        layout.addLayout(adv_row)
+
+        layout.addWidget(Note(
+            "ℹ️  Character names and place names are never translated — "
+            "passed through to the model exactly as written."
+        ))
+        layout.addStretch()
+
+        self._meta_reveal = _Reveal(self._meta_card)
+        self._voice_reveal = _Reveal(self._voice_wrap)
+        self.repopulate_voices(True)
+        self._on_formats_changed()
+        self._meta_reveal.set_visible(False, animate=False)
+        self._voice_reveal.set_visible(False, animate=False)
+
+    # ── public API ──
+    def timeout_value(self) -> int:
+        return self._timeout.value() if self._timeout else OLLAMA_TIMEOUT
+
+    def max_tokens_value(self) -> int:
+        if self._tokens:
+            return self._tokens.value()
+        return SETTINGS.get("mlx_max_tokens", 8192)
+
+    def prefill(self, folder: str, title: str, author: str) -> None:
+        if not self._folder.text():
+            self._folder.setText(folder)
+        if title and not self._meta_title.text():
+            self._meta_title.setText(title)
+        if author and not self._meta_creator.text():
+            self._meta_creator.setText(author)
+
+    def repopulate_voices(self, target_is_spanish: bool) -> None:
+        """Rebuild the voice list, preserving the selection when possible."""
+        previous = self._voice.currentData()
+        lang = "es" if target_is_spanish else "en"
+        self._voice.blockSignals(True)
+        self._voice.clear()
+        for entry in voices_for_language(lang):
+            self._voice.addItem(entry["label"], userData=entry["value"])
+        idx = self._voice.findData(previous)
+        self._voice.setCurrentIndex(idx if idx >= 0 else 0)
+        self._voice.blockSignals(False)
+
+    def apply_to(self, state: wl.WizardState) -> None:
+        state.formats = {k: b.isChecked() for k, b in self._fmt.items()}
+        state.mp3_enabled = self._mp3.isChecked() and self._mp3.isEnabled()
+        state.voice = self._voice.currentData() if state.mp3_enabled else None
+        state.out_folder = self._folder.text().strip()
+        state.meta_title = self._meta_title.text()
+        state.meta_creator = self._meta_creator.text()
+        state.meta_language = self._meta_language.text()
+        state.meta_contributor = self._meta_contributor.text()
+        state.chunk_words = self._chunk.value()
+        state.timeout_sec = self.timeout_value()
+        state.max_tokens = self.max_tokens_value()
+
+    def load_from(self, state: wl.WizardState) -> None:
+        self._folder.setText(state.out_folder)
+
+    def set_enabled_controls(self, enabled: bool) -> None:
+        for box in self._fmt.values():
+            box.setEnabled(enabled)
+        for w in (self._mp3, self._voice, self._folder, self._chunk,
+                  self._meta_title, self._meta_creator,
+                  self._meta_language, self._meta_contributor):
+            w.setEnabled(enabled)
+        if self._timeout:
+            self._timeout.setEnabled(enabled)
+        if self._tokens:
+            self._tokens.setEnabled(enabled)
+        if enabled:
+            self._sync_mp3_gate()
+
+    # ── internals ──
+    def _browse_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select output folder", self._folder.text() or str(Path.home())
+        )
+        if folder:
+            self._folder.setText(folder)
+
+    def _on_formats_changed(self) -> None:
+        self._sync_mp3_gate()
+        self._meta_reveal.set_visible(self._fmt["epub"].isChecked())
+        self.changed.emit()
+
+    def _sync_mp3_gate(self) -> None:
+        """MP3 needs Kokoro installed AND .txt selected (worker.py:472)."""
+        txt = self._fmt["txt"].isChecked()
+        enabled = _KOKORO_AVAILABLE and txt
+        self._mp3.setEnabled(enabled)
+        if not enabled:
+            self._mp3.setChecked(False)
+        if not _KOKORO_AVAILABLE:
+            self._mp3_note.setText("Kokoro is not installed — see kokoro.md.")
+        elif not txt:
+            self._mp3_note.setText("Requires Plain text (.txt) to be selected.")
+        else:
+            self._mp3_note.setText("")
+        self._voice_reveal.set_visible(self._mp3.isChecked() and enabled)
+
+    def _on_mp3_toggled(self, _state: int) -> None:
+        self._voice_reveal.set_visible(
+            self._mp3.isChecked() and self._mp3.isEnabled()
+        )
+        self.changed.emit()
