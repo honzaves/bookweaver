@@ -262,12 +262,12 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
         default_model = cfg["default_model"][llm_backend]
 
     SETTINGS = {
-        "llm_backend": llm_backend,
-        "models": models,
+        "llm_backend":   llm_backend,
+        "models":        models,
         "default_model": default_model,
         "mlx_max_tokens": int(cfg.get("mlx_max_tokens", 8192)),
-        "voices": cfg.get("voices", {}),
-        "tts": cfg.get("tts", {}),
+        "voices":        cfg.get("voices", {}),
+        "tts":           cfg.get("tts", {}),
         "chapter_title_preview_chars": int(
             cfg.get("chapter_title_preview_chars", 50)
         ),
@@ -285,9 +285,9 @@ _build()
 # ──────────────────────────────────────────────────────────────
 # Target language of each processing mode's output text.
 TARGET_LANG = {
-    "summarise_rewrite": "es",
-    "translate": "es",
-    "summarise_only": "en",
+    "summarise_rewrite":   "es",
+    "translate":           "es",
+    "summarise_only":      "en",
     "summarise_key_ideas": "es",
 }
 
