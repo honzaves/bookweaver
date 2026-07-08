@@ -289,7 +289,7 @@ Note `E221` (aligned assignments) is suppressed in `.pycodestyle` — the aligne
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `pytest tests/test_wizard_theme.py -q`
-Expected: PASS (13 tests)
+Expected: PASS (9 tests)
 
 - [ ] **Step 6: Verify the old UI still boots**
 
@@ -495,7 +495,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/test_wizard_theme.py -q`
-Expected: PASS (17 tests)
+Expected: PASS (13 tests)
 
 - [ ] **Step 5: Lint and commit**
 
@@ -598,7 +598,7 @@ def load_caveat(path: Path = CAVEAT_PATH) -> str | None:
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `pytest tests/test_wizard_theme.py -q`
-Expected: PASS (21 tests)
+Expected: PASS (17 tests)
 
 - [ ] **Step 6: Commit**
 
