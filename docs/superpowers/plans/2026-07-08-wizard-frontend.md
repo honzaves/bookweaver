@@ -548,6 +548,19 @@ file assets/Caveat-Regular.ttf
 ```
 Expected: `assets/Caveat-Regular.ttf: TrueType Font data, ...` (~403 KB)
 
+> **Landmine, discovered during Task 3.** `tests/conftest.py` **always** installs a minimal
+> PyQt6 stub, even though real PyQt6 is installed — its guard is `if "PyQt6" in sys.modules`,
+> and `PyQt6` is never in `sys.modules` at conftest import time. `tests/conftest.py` is **off
+> limits**. Any pytest test needing real Qt must swap `sys.modules` itself; `test_wizard_theme.py`
+> gains a self-restoring `_real_pyqt6` fixture plus a module-scoped `qapp` fixture for this.
+> Also: `addApplicationFont` needs an **absolute** path (relative → `-1`), and **segfaults**
+> without a live `QApplication` for *any* file that exists — valid font or garbage alike.
+>
+> The four tests below are **necessary but not sufficient**: they all pass against a
+> `load_caveat` that always returns `None`. A fifth, happy-path test asserting
+> `load_caveat() == "Caveat"` (requesting the `qapp` fixture) is **required** — without it the
+> coverage is vacuous. Total after Task 3: **18** tests.
+
 - [ ] **Step 2: Write the failing test**
 
 Append to `tests/test_wizard_theme.py`:
@@ -592,6 +605,15 @@ def load_caveat(path: Path = CAVEAT_PATH) -> str | None:
     Returns None when the asset is missing or unparseable — a fresh clone
     without assets/ must never crash. Callers fall back to muted italic
     system font for the per-step prompts, which are purely cosmetic.
+
+    Requires a live QApplication (Qt's font database reaches the platform
+    integration and segfaults otherwise) and an absolute *path* (a relative
+    one silently returns -1, indistinguishable from an unparseable font).
+    wizard.main() calls this after constructing the QApplication.
+
+    Contains NO except handlers by design: PyQt6 is a hard dependency of the
+    wizard, so a broken install must surface loudly rather than silently
+    degrade to the fallback font.
     """
     if not Path(path).exists():
         return None
@@ -3279,6 +3301,8 @@ def main() -> None:
     palette.setColor(QPalette.ColorRole.Highlight, QColor(W_AMBER))
     app.setPalette(palette)
 
+    # load_caveat() MUST come after QApplication(): Qt's font database
+    # reaches the platform integration and segfaults without a live app.
     win = WizardWindow(caveat=load_caveat())
     win.show()
     sys.exit(app.exec())
