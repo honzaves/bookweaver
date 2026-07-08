@@ -21,8 +21,6 @@ from settings import creativity_to_temperature, TARGET_LANG
 # ──────────────────────────────────────────────────────────────
 #  Vocabulary
 # ──────────────────────────────────────────────────────────────
-MODES: tuple[str, ...] = ("sr", "full", "sum", "key")
-
 # The design's state names are short; the worker's are explicit.
 MODE_TO_WORKER: dict[str, str] = {
     "sr": "summarise_rewrite",

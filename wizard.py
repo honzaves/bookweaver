@@ -47,6 +47,7 @@ class WizardWindow(QMainWindow):
         self._backend = SETTINGS.get("llm_backend", "ollama")
         self._worker = None
         self._resume_state: dict | None = None
+        self._loaded_epub_path: str | None = None
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -177,7 +178,14 @@ class WizardWindow(QMainWindow):
     def _on_step1_changed(self) -> None:
         self._collect()
         if self.state.epub_path:
-            title, author = self._steps[1].read_book_metadata(self.state.epub_path)
+            if self.state.epub_path != self._loaded_epub_path:
+                # A genuinely new/different EPUB was loaded — reset the
+                # prefill-derived fields so this book's values win. A
+                # same-path re-emission (checkbox toggle, model change)
+                # must not clobber any edits the user made in step 3.
+                self._loaded_epub_path = self.state.epub_path
+                self._steps[3].clear_prefill()
+            title, author = self._steps[1].cached_metadata()
             from pathlib import Path
             self._steps[3].prefill(str(Path(self.state.epub_path).parent),
                                    title, author)

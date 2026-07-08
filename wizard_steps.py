@@ -54,6 +54,8 @@ class StepBook(QWidget):
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._chapters: list[wl.ChapterRow] = []
+        self._book_title = ""
+        self._book_author = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -143,6 +145,7 @@ class StepBook(QWidget):
         except Exception:
             self._chapters = []
             self._list.clear()
+        self._book_title, self._book_author = self.read_book_metadata(path)
         self._refresh_meta()
         self.changed.emit()
 
@@ -157,6 +160,15 @@ class StepBook(QWidget):
                     author[0][0] if author else "")
         except Exception:
             return "", ""
+
+    def cached_metadata(self) -> tuple[str, str]:
+        """(title, author) cached from the most recent _load_epub() call.
+
+        Avoids a second full EPUB parse on every unrelated 'changed' emission
+        (chapter checkbox toggles, model changes) — read_book_metadata() only
+        runs once per file load, in _load_epub().
+        """
+        return self._book_title, self._book_author
 
     def _on_selection_changed(self) -> None:
         self._refresh_meta()
@@ -562,6 +574,18 @@ class StepOutput(QWidget):
             self._meta_title.setText(title)
         if author and not self._meta_creator.text():
             self._meta_creator.setText(author)
+
+    def clear_prefill(self) -> None:
+        """Clear the prefill-derived fields ahead of a new EPUB's prefill().
+
+        Called only when a *different* EPUB path is loaded — prefill() fills
+        empties only, so clearing first lets the new book's folder/title/
+        author take over. Never called on a same-path 'changed' re-emission
+        (checkbox toggle, model change), which must not clobber user edits.
+        """
+        self._folder.clear()
+        self._meta_title.clear()
+        self._meta_creator.clear()
 
     def repopulate_voices(self, target_is_spanish: bool) -> None:
         """Rebuild the voice list, preserving the selection when possible."""
