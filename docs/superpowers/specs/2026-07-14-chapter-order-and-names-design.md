@@ -25,19 +25,25 @@ Scope decisions (confirmed with the user):
   starts fresh in book order. Order rides resume via the existing
   `**config` spread.
 
-## 1. Better chapter names — `epub_io.py` (shared)
+## 1. Better chapter names — regression pin + dependency floor
 
-Add a second title source next to the NCX map: parse the EPUB3 nav
-document (the manifest item with the `nav` property /
-`ebooklib.ITEM_NAVIGATION`), extract the anchors of
-`<nav epub:type="toc">` into the same `basename(href) → link text`
-mapping. Merge with `setdefault` semantics: NCX entries win, nav fills
-gaps. The full resolution chain becomes:
+**Amended 2026-07-14 (approved by user):** investigation showed that
+ebooklib 0.20 (the installed version) already parses the EPUB3
+`nav.xhtml` TOC into `book.toc` — nav-only books get real chapter names
+through the existing `_flatten_toc` path, and when both NCX and nav are
+present, the nav title wins. Writing our own nav parser would be dead
+code, so no BookWeaver parsing change is made. Instead:
 
-**TOC (NCX + nav) → h1/h2/h3 → `<title>` tag → text preview → filename**
+- Add a regression test pinning that a nav-only EPUB (empty NCX)
+  resolves real chapter names via the existing chain.
+- Raise the dependency floor from `ebooklib>=0.18` to `ebooklib>=0.20`
+  (in `pyproject.toml` and `requirements.txt`) so the guarantee holds on
+  fresh installs.
 
-No signature changes; both frontends benefit automatically. A TOC entry
-that is just a number is used as-is.
+The resolution chain stays as implemented:
+**TOC (`book.toc`: NCX and/or nav, per ebooklib) → h1/h2/h3 → `<title>`
+tag → text preview → filename.** A TOC entry that is just a number is
+used as-is.
 
 ## 2. Ordered selection — `epub_io.select_chapters` + `wizard_logic`
 
