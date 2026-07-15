@@ -99,9 +99,26 @@ def _mark_separator_lines(text: str) -> str:
     return "\n".join(out)
 
 
+def _spine_documents(book: epub.EpubBook) -> list:
+    """The book's documents in spine (reading) order. The OPF manifest is an
+    unordered inventory — some publishers list front matter after the body —
+    so iterating get_items() directly can misorder chapters. Falls back to
+    manifest order when the spine is empty or none of its idrefs resolve."""
+    docs = []
+    for entry in book.spine:
+        idref = entry[0] if isinstance(entry, (tuple, list)) else entry
+        item = book.get_item_with_id(idref)
+        if item is not None and item.get_type() == ebooklib.ITEM_DOCUMENT:
+            docs.append(item)
+    if docs:
+        return docs
+    return [i for i in book.get_items()
+            if i.get_type() == ebooklib.ITEM_DOCUMENT]
+
+
 def extract_chapters(path: str, preview_chars: int = 50,
                      mark_scene_breaks: bool = False) -> list[Chapter]:
-    """Read *path* and return its chapters in document order.
+    """Read *path* and return its chapters in spine (reading) order.
 
     When *mark_scene_breaks* is True, scene breaks (<hr> elements and
     separator-only lines like '* * *') are represented in Chapter.text as a
@@ -113,9 +130,7 @@ def extract_chapters(path: str, preview_chars: int = 50,
     toc_map = _flatten_toc(book.toc)
     chapters: list[Chapter] = []
     idx = 0
-    for item in book.get_items():
-        if item.get_type() != ebooklib.ITEM_DOCUMENT:
-            continue
+    for item in _spine_documents(book):
         soup = BeautifulSoup(item.get_content(), "html.parser")
         # Filter and title use the unmarked text/soup: the app extracts
         # without marking, and inclusion/index/title parity between the two

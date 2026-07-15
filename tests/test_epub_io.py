@@ -11,18 +11,21 @@ import epub_io
 from epub_io import Chapter, extract_chapters, select_chapters
 
 
-def _build_epub(tmp_path, docs, toc=None):
-    """docs: list of (file_name, html). Returns the written .epub path."""
+def _build_epub(tmp_path, docs, toc=None, spine_names=None):
+    """docs: list of (file_name, html). Returns the written .epub path.
+
+    spine_names reorders the spine (reading order) independently of docs
+    (manifest order); default keeps the two aligned."""
     book = epub.EpubBook()
     book.set_identifier("id123")
     book.set_title("Fixture Book")
     book.set_language("en")
-    items = []
+    items = {}
     for name, html in docs:
         it = epub.EpubHtml(title=name, file_name=name, lang="en")
         it.content = html
         book.add_item(it)
-        items.append(it)
+        items[name] = it
     # An explicit toc is passed verbatim; otherwise leave the TOC empty so
     # title resolution falls back to <h1> headings. (tuple(items) would
     # round-trip into a TOC that maps each doc to its *filename*, since the
@@ -30,7 +33,8 @@ def _build_epub(tmp_path, docs, toc=None):
     book.toc = toc if toc is not None else ()
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
-    book.spine = ["nav"] + items
+    order = spine_names if spine_names is not None else [n for n, _ in docs]
+    book.spine = ["nav"] + [items[n] for n in order]
     out = tmp_path / "fixture.epub"
     epub.write_epub(str(out), book)
     return str(out)
@@ -100,6 +104,36 @@ class TestExtractChapters:
         assert len(chapters) == 1
         assert chapters[0].title == "Real"
         assert chapters[0].index == 0
+
+    def test_follows_spine_order_not_manifest_order(self, tmp_path):
+        # Publisher EPUBs may list front matter last in the manifest even
+        # though the spine puts it first (books/mattering_too). Reading
+        # order is defined by the spine, and extraction must follow it.
+        path = _build_epub(
+            tmp_path,
+            docs=[
+                ("chap_01.xhtml", f"<h1>One</h1>{BODY}"),
+                ("chap_02.xhtml", f"<h1>Two</h1>{BODY}"),
+                ("intro.xhtml", f"<h1>Intro</h1>{BODY}"),
+            ],
+            spine_names=["intro.xhtml", "chap_01.xhtml", "chap_02.xhtml"],
+        )
+        chapters = extract_chapters(path)
+        assert [c.title for c in chapters] == ["Intro", "One", "Two"]
+        assert [c.index for c in chapters] == [0, 1, 2]
+
+    def test_falls_back_to_manifest_when_spine_unresolvable(self, tmp_path):
+        # A malformed spine (idrefs that resolve to nothing) must not lose
+        # the book — extraction falls back to manifest order.
+        path = _build_epub(tmp_path, [
+            ("chap_01.xhtml", f"<h1>One</h1>{BODY}"),
+            ("chap_02.xhtml", f"<h1>Two</h1>{BODY}"),
+        ])
+        book = epub.read_epub(path)
+        book.spine = [("ghost", "yes")]
+        docs = epub_io._spine_documents(book)
+        assert [d.get_name() for d in docs] == \
+            ["chap_01.xhtml", "chap_02.xhtml", "nav.xhtml"]
 
     def test_uses_toc_title_when_present(self, tmp_path):
         toc = (epub.Link("chap_01.xhtml", "Chapter From TOC", "c1"),)

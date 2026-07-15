@@ -1,6 +1,6 @@
-Redo the UI flow
-- select mode in dropdown
-- choose options
+- book name
+- when done, add button "back to start" with all fields reset
+- select book opens in current dir
+- next step blocked when no book or destination folder selected
 
-UI doesn't fit all components on load
-UI spacing chapters list
+- remove the old UI
