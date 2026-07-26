@@ -192,3 +192,62 @@ class TestSelectChapters:
     def test_ignores_unknown_indices(self):
         out = select_chapters(self.CH, [1, 99])
         assert [c.index for c in out] == [1]
+
+
+class TestNavOnlyTitles:
+    def test_nav_only_epub_resolves_real_names(self, tmp_path):
+        """ebooklib >= 0.20 parses the EPUB3 nav TOC into book.toc, so a
+        book with an EMPTY NCX still gets real chapter names through the
+        existing TOC -> heading -> preview chain. Pin it: if a future
+        ebooklib regresses this, the title would fall back to a text
+        preview ('word word word ...') and this test fails."""
+        book = epub.EpubBook()
+        book.set_identifier("id123")
+        book.set_title("Fixture Book")
+        book.set_language("en")
+        c1 = epub.EpubHtml(file_name="c1.xhtml", lang="en")
+        c1.content = BODY                      # no headings, no <title>
+        book.add_item(c1)
+        nav = epub.EpubHtml(file_name="nav.xhtml", lang="en")
+        nav.content = (
+            '<nav epub:type="toc"><ol>'
+            '<li><a href="c1.xhtml">Real Name</a></li></ol></nav>'
+        )
+        nav.properties.append("nav")
+        book.add_item(nav)
+        book.add_item(epub.EpubNcx())          # NCX present but empty
+        book.spine = [c1]
+        path = tmp_path / "navonly.epub"
+        epub.write_epub(str(path), book)
+
+        chapters = extract_chapters(str(path))
+        assert [c.title for c in chapters] == ["Real Name"]
+
+    def test_nav_title_wins_over_ncx(self, tmp_path):
+        """When a book ships BOTH an NCX and a nav TOC with conflicting
+        titles, ebooklib 0.20 hands us the NAV title in book.toc. Spec
+        section 5 asks this precedence be pinned — it is the surprising
+        half of the amendment, and a future ebooklib flipping it would
+        silently change every chapter name in such books."""
+        book = epub.EpubBook()
+        book.set_identifier("id123")
+        book.set_title("Fixture Book")
+        book.set_language("en")
+        c1 = epub.EpubHtml(file_name="c1.xhtml", lang="en")
+        c1.content = BODY                      # no headings, no <title>
+        book.add_item(c1)
+        nav = epub.EpubHtml(file_name="nav.xhtml", lang="en")
+        nav.content = (
+            '<nav epub:type="toc"><ol>'
+            '<li><a href="c1.xhtml">Nav Name</a></li></ol></nav>'
+        )
+        nav.properties.append("nav")
+        book.add_item(nav)
+        book.toc = (epub.Link("c1.xhtml", "NCX Name", "c1"),)
+        book.add_item(epub.EpubNcx())          # writes 'NCX Name' to toc.ncx
+        book.spine = [c1]
+        path = tmp_path / "both.epub"
+        epub.write_epub(str(path), book)
+
+        chapters = extract_chapters(str(path))
+        assert [c.title for c in chapters] == ["Nav Name"]
