@@ -402,6 +402,71 @@ class TestRunChapterSelection:
         assert w.finished.emit.call_args[0][0] is True
 
 
+class TestRunChapterOrdering:
+    """selected_chapters is an ORDERED list: [2, 0] processes Gamma before
+    Alpha. chapter_numbering='position' (wizard) numbers per-chapter files
+    by processing position; absent/'book' (app.py) keeps full-list index."""
+
+    CHAPTERS = [
+        epub_io.Chapter(0, "c0.xhtml", "Alpha", "alpha text"),
+        epub_io.Chapter(1, "c1.xhtml", "Beta", "beta text"),
+        epub_io.Chapter(2, "c2.xhtml", "Gamma", "gamma text"),
+    ]
+
+    def _run(self, tmp_path, extra):
+        cfg = {
+            "epub_path": str(tmp_path / "mybook.epub"),
+            "out_format": ["txt"],
+            "out_folder": str(tmp_path),
+            "mode": "translate",
+            "level": "B2",
+            "keep_pct": 40,
+            "model": "m",
+            "creativity": 5,
+            "chunk_size": 2000,
+            **extra,
+        }
+        w = _make_worker(cfg)
+        with patch.object(ProcessingWorker, "_llm_call", return_value="texto"), \
+                patch.object(epub_io, "extract_chapters",
+                             return_value=self.CHAPTERS):
+            w.run()
+        return w
+
+    def test_position_numbering_follows_custom_order(self, tmp_path):
+        self._run(tmp_path, {"selected_chapters": [2, 0],
+                             "chapter_numbering": "position"})
+        files = sorted(
+            p.name for p in (tmp_path / "mybook_ES_B2_chapters").glob("*.txt")
+        )
+        assert files == ["01 - Gamma.txt", "02 - Alpha.txt"]
+
+    def test_default_book_numbering_keeps_fulllist_index(self, tmp_path):
+        self._run(tmp_path, {"selected_chapters": [2, 0]})
+        files = sorted(
+            p.name for p in (tmp_path / "mybook_ES_B2_chapters").glob("*.txt")
+        )
+        assert files == ["01 - Alpha.txt", "03 - Gamma.txt"]
+
+    def test_position_numbering_places_book_key_ideas_after_last(self, tmp_path):
+        # summarise_key_ideas with >= 2 chapters appends a book-wide file;
+        # under position numbering its NN follows the PROCESSED count
+        # (2 chapters -> '03 - ...'), not the full-list count (which would
+        # give '04 - ...' with 3 extracted chapters).
+        self._run(tmp_path, {"selected_chapters": [2, 0],
+                             "chapter_numbering": "position",
+                             "mode": "summarise_key_ideas",
+                             "summary_lang": "en"})
+        files = sorted(
+            p.name for p in (tmp_path / "mybook_ES_B2_chapters").glob("*.txt")
+        )
+        assert len(files) == 3
+        assert files[0].startswith("01 - Gamma")
+        assert files[1].startswith("02 - Alpha")
+        assert files[2].startswith("03 - ")
+        assert not any(f.startswith("04 - ") for f in files)
+
+
 class TestSafeFilename:
     def test_replaces_path_separators(self):
         assert "/" not in ProcessingWorker._safe_filename("a/b")

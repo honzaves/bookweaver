@@ -113,6 +113,7 @@ class ProcessingWorker(QThread):
         carry_mode = cfg.get("carry_mode", "off")
         summary_lang = cfg.get("summary_lang", "es")
         resume_from = cfg.get("resume_from", 0)
+        numbering = cfg.get("chapter_numbering", "book")
         meta = {
             "title": cfg.get("meta_title") or Path(epub_path).stem,
             "creator": cfg.get("meta_creator") or "",
@@ -403,7 +404,8 @@ class ProcessingWorker(QThread):
             if "txt" in out_formats:
                 self._write_chapter_file(
                     out_folder, stem, level,
-                    chapter.index, chapter.title,
+                    idx if numbering == "position" else chapter.index,
+                    chapter.title,
                     chapter_body,
                 )
             self.log.emit(f"✅  Chapter {idx + 1} done.", "success")
@@ -430,11 +432,14 @@ class ProcessingWorker(QThread):
                 results.append((book_header, book_body))
                 self.completed_results = results[:]
                 if "txt" in out_formats:
-                    # index len(all_chapters) keeps the NN prefix after the
-                    # last chapter; title is the localized book header.
+                    # NN lands right after the last chapter file: processed
+                    # count under position numbering, full-list count under
+                    # book numbering; title is the localized book header.
                     self._write_chapter_file(
                         out_folder, stem, level,
-                        len(all_chapters), book_header, book_body,
+                        len(chapters) if numbering == "position"
+                        else len(all_chapters),
+                        book_header, book_body,
                     )
                 self.log.emit("🧩  Book-wide key ideas added.", "success")
             else:
