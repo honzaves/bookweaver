@@ -38,13 +38,13 @@ CARRY_TO_WORKER: dict[str, str] = {
 }
 
 # Exactly what ProcessingWorker._run() reads. app.py emits the first 21;
-# max_tokens is the wizard's addition (see worker.py __init__).
+# max_tokens and chapter_numbering are the wizard's additions.
 CONFIG_KEYS: frozenset[str] = frozenset({
     "epub_path", "model", "backend", "selected_chapters", "mode", "level",
     "keep_pct", "creativity", "carry_mode", "summary_lang", "target_lang",
     "out_format", "out_folder", "generate_mp3", "voice",
     "meta_title", "meta_creator", "meta_language", "meta_contributor",
-    "chunk_size", "timeout", "max_tokens",
+    "chunk_size", "timeout", "max_tokens", "chapter_numbering",
 })
 
 KEEP_SWEET_MIN, KEEP_SWEET_MAX = 30, 50
@@ -75,8 +75,9 @@ class ChapterRow:
     """One row of the Step-1 chapter checklist.
 
     `index` is epub_io.Chapter.index — the stable 0-based document position,
-    which is what worker.select_chapters() filters on. It is NOT the row's
-    position in this list.
+    which is what epub_io.select_chapters() filters on. It is NOT the row's
+    position in this list: the LIST ORDER is the user's processing order,
+    and selected_chapters is emitted in that order.
     """
     index: int
     title: str
@@ -212,7 +213,7 @@ def recap_text(state: WizardState, model_label: str) -> str:
 def build_config(state: WizardState, backend: str) -> dict:
     """Translate WizardState into ProcessingWorker's config dict.
 
-    Emits all 22 keys on both backends. The dict shape must never branch on
+    Emits all 23 keys on both backends. The dict shape must never branch on
     backend: _on_resume() spreads **config, and a shape that varies would
     make the resume path backend-dependent. The worker simply ignores the
     key its backend does not use (self._timeout is unread on mlx,
@@ -251,4 +252,5 @@ def build_config(state: WizardState, backend: str) -> dict:
         "chunk_size": state.chunk_words,
         "timeout": state.timeout_sec,
         "max_tokens": state.max_tokens,
+        "chapter_numbering": "position",
     }

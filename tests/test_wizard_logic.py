@@ -176,10 +176,10 @@ class TestRecapText:
 
 # ── build_config: the contract with ProcessingWorker ───────────
 class TestBuildConfig:
-    def test_emits_exactly_the_22_contract_keys(self):
+    def test_emits_exactly_the_23_contract_keys(self):
         cfg = wl.build_config(_state(), "mlx")
         assert set(cfg) == wl.CONFIG_KEYS
-        assert len(wl.CONFIG_KEYS) == 22
+        assert len(wl.CONFIG_KEYS) == 23
 
     def test_key_set_is_identical_on_both_backends(self):
         """Dict shape must not branch on backend — resume spreads **config."""
@@ -187,7 +187,7 @@ class TestBuildConfig:
                set(wl.build_config(_state(), "ollama"))
 
     def test_covers_every_key_app_py_emits(self):
-        """The wizard is a superset of app.py's 21 keys, plus max_tokens."""
+        """The wizard is a superset of app.py's 21 keys, plus max_tokens and chapter_numbering."""
         app_keys = {
             "epub_path", "level", "keep_pct", "model", "backend", "out_format",
             "out_folder", "selected_chapters", "creativity", "mode",
@@ -196,7 +196,22 @@ class TestBuildConfig:
             "voice", "summary_lang", "target_lang",
         }
         assert app_keys < wl.CONFIG_KEYS
-        assert wl.CONFIG_KEYS - app_keys == {"max_tokens"}
+        assert wl.CONFIG_KEYS - app_keys == {"max_tokens", "chapter_numbering"}
+
+    def test_chapter_numbering_is_position_on_both_backends(self):
+        for backend in ("mlx", "ollama"):
+            cfg = wl.build_config(_state(), backend)
+            assert cfg["chapter_numbering"] == "position"
+
+    def test_selected_chapters_follow_row_order(self):
+        # Row order IS the processing order — a reordered list must come
+        # out in display order, unchecked rows dropped, never re-sorted.
+        rows = [wl.ChapterRow(4, "Epilogue", True),
+                wl.ChapterRow(0, "Intro", True),
+                wl.ChapterRow(2, "Two", False),
+                wl.ChapterRow(1, "One", True)]
+        cfg = wl.build_config(_state(chapters=rows), "mlx")
+        assert cfg["selected_chapters"] == [4, 0, 1]
 
     # ── enum translation ──
     @pytest.mark.parametrize("ui,worker", [
