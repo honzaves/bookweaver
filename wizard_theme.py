@@ -212,17 +212,19 @@ QTextEdit#logView {{
 }}
 
 QCheckBox, QRadioButton {{ spacing: 8px; color: {W_TEXT}; background: transparent; }}
-QCheckBox::indicator {{
+QCheckBox::indicator, QListView::indicator {{
     width: 17px; height: 17px; border-radius: 5px;
     border: 1.5px solid {W_BORDER_CTRL}; background: {W_INSET};
 }}
-QCheckBox::indicator:checked {{
+QCheckBox::indicator:checked, QListView::indicator:checked {{
     background-color: {W_AMBER}; border-color: {W_AMBER};
 }}
-QCheckBox::indicator:indeterminate {{
+QCheckBox::indicator:indeterminate, QListView::indicator:indeterminate {{
     background-color: {W_BTN_DISABLED_BG}; border-color: {W_AMBER_DIM};
 }}
-QCheckBox::indicator:disabled {{ border-color: {W_BORDER}; background: {W_WINDOW_BG}; }}
+QCheckBox::indicator:disabled, QListView::indicator:disabled {{
+    border-color: {W_BORDER}; background: {W_WINDOW_BG};
+}}
 
 QScrollArea#contentArea {{
     background: transparent;

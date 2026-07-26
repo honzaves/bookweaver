@@ -12,12 +12,14 @@ subclassed here.
 
 import html
 from dataclasses import replace
+from functools import partial
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import (
-    QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QRadioButton,
-    QScrollArea, QSizePolicy, QSlider, QTextEdit, QVBoxLayout, QWidget,
+    QAbstractItemView, QButtonGroup, QCheckBox, QFrame, QGridLayout,
+    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QRadioButton,
+    QSizePolicy, QSlider, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
 import wizard_logic as wl
@@ -504,8 +506,50 @@ class ModeTileGrid(QWidget):
         self._radios[key].setChecked(True)
 
 
+class _RowMoveButtons(QWidget):
+    """▲▼ pair docked at the right edge of a chapter row.
+
+    Lives in a full-row setItemWidget overlay: a leading stretch keeps the
+    buttons right-aligned, and the container paints no background, so the
+    item's own checkbox/text stay visible and presses outside the buttons
+    fall through to the viewport (which is what lets drag still work)."""
+
+    moveUp = pyqtSignal()
+    moveDown = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 4, 0)
+        lay.setSpacing(0)
+        lay.addStretch()
+        self._up = QToolButton()
+        self._up.setText("▲")
+        self._down = QToolButton()
+        self._down.setText("▼")
+        for btn, sig in ((self._up, self.moveUp), (self._down, self.moveDown)):
+            btn.setAutoRaise(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setStyleSheet(
+                f"QToolButton {{ color:{W_MUTED}; border:none;"
+                f" background:transparent; padding:0 2px; }}"
+                f"QToolButton:hover {{ color:{W_TEXT_SECONDARY}; }}"
+            )
+            btn.clicked.connect(sig)
+            lay.addWidget(btn)
+
+    def set_edges(self, first: bool, last: bool) -> None:
+        self._up.setEnabled(not first)
+        self._down.setEnabled(not last)
+
+
 class TriStateChapterList(QWidget):
-    """'Select all' tri-state master + a scrollable list of chapter checkboxes."""
+    """'Select all' tri-state master + a drag-reorderable chapter list.
+
+    Row order IS the processing order: rows() returns ChapterRows in display
+    order, and labels renumber live ('01.', '02.', …) after every drag or
+    ▲▼ move. selectionChanged fires on check toggles AND on reorders."""
 
     selectionChanged = pyqtSignal()
 
@@ -520,65 +564,128 @@ class TriStateChapterList(QWidget):
         self._master.clicked.connect(self._on_master_clicked)
         layout.addWidget(self._master)
 
-        self._inner = QWidget()
-        self._inner_layout = QVBoxLayout(self._inner)
-        self._inner_layout.setContentsMargins(8, 6, 8, 6)
-        self._inner_layout.setSpacing(2)
-        self._inner_layout.addStretch()
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self._inner)
-        scroll.setMaximumHeight(188)
-        scroll.setStyleSheet(
-            f"background:{W_INSET}; border:1px solid {W_BORDER};"
-            f"border-radius:8px;"
+        self._list = QListWidget()
+        self._list.setDragDropMode(
+            QAbstractItemView.DragDropMode.InternalMove
         )
-        layout.addWidget(scroll)
+        self._list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._list.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self._list.setMaximumHeight(188)
+        self._list.setStyleSheet(
+            f"QListWidget {{ background:{W_INSET};"
+            f" border:1px solid {W_BORDER}; border-radius:8px;"
+            f" padding:4px; }}"
+            f"QListWidget::item {{ padding:2px 4px; border-radius:4px; }}"
+            f"QListWidget::item:hover {{ background:{W_ROW_HOVER}; }}"
+            f"QListWidget::item:selected {{ background:{W_ROW_HOVER}; }}"
+        )
+        self._list.itemChanged.connect(self._on_item_changed)
+        # Fires after an InternalMove drop; also reachable programmatically
+        # via model().moveRow (the offscreen script uses that).
+        self._list.model().rowsMoved.connect(self._on_rows_moved)
+        layout.addWidget(self._list)
 
-        # Store the ChapterRow itself, never re-parse it out of the label:
-        # the display format ("01.  Title") must not be load-bearing data.
-        self._boxes: list[tuple[wl.ChapterRow, QCheckBox]] = []
-
+    # ── public API (unchanged from the pre-reorder widget) ──
     def clear(self) -> None:
-        for _, box in self._boxes:
-            box.setParent(None)
-        self._boxes = []
+        self._list.blockSignals(True)
+        self._list.clear()
+        self._list.blockSignals(False)
         self._sync_master()
 
     def set_chapters(self, rows: list["wl.ChapterRow"]) -> None:
-        self.clear()
+        self._list.blockSignals(True)
+        self._list.clear()
         for row in rows:
-            box = QCheckBox(f"{row.index + 1:02d}.  {row.title}")
-            box.setChecked(row.checked)
-            box.setStyleSheet(f"QCheckBox:hover {{ background:{W_ROW_HOVER}; }}")
-            box.stateChanged.connect(self._on_child_changed)
-            self._inner_layout.insertWidget(self._inner_layout.count() - 1, box)
-            self._boxes.append((row, box))
+            item = QListWidgetItem()
+            # No ItemIsDropEnabled: dropping ONTO a row would nest it.
+            flags = Qt.ItemFlag.ItemIsEnabled
+            flags |= Qt.ItemFlag.ItemIsSelectable
+            flags |= Qt.ItemFlag.ItemIsUserCheckable
+            flags |= Qt.ItemFlag.ItemIsDragEnabled
+            item.setFlags(flags)
+            item.setCheckState(
+                Qt.CheckState.Checked if row.checked
+                else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, row)
+            self._list.addItem(item)
+        self._list.blockSignals(False)
+        self._relabel()
         self._sync_master()
 
     def rows(self) -> list["wl.ChapterRow"]:
-        return [replace(row, checked=box.isChecked())
-                for row, box in self._boxes]
+        out = []
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            row = item.data(Qt.ItemDataRole.UserRole)
+            out.append(replace(
+                row,
+                checked=item.checkState() == Qt.CheckState.Checked,
+            ))
+        return out
+
+    # ── internals ──
+    def _relabel(self) -> None:
+        """Renumber every label to its display position and (re)attach the
+        ▲▼ row widgets — Qt drops setItemWidget widgets on InternalMove, so
+        this runs after every reorder, not just on set_chapters."""
+        count = self._list.count()
+        self._list.blockSignals(True)
+        for i in range(count):
+            item = self._list.item(i)
+            row = item.data(Qt.ItemDataRole.UserRole)
+            item.setText(f"{i + 1:02d}.  {row.title}")
+            buttons = _RowMoveButtons()
+            buttons.set_edges(i == 0, i == count - 1)
+            buttons.moveUp.connect(partial(self._move_item, item, -1))
+            buttons.moveDown.connect(partial(self._move_item, item, +1))
+            self._list.setItemWidget(item, buttons)
+        self._list.blockSignals(False)
+
+    def _move_item(self, item: QListWidgetItem, delta: int) -> None:
+        pos = self._list.row(item)
+        new_pos = pos + delta
+        if not 0 <= new_pos < self._list.count():
+            return
+        self._list.blockSignals(True)
+        taken = self._list.takeItem(pos)
+        self._list.insertItem(new_pos, taken)
+        self._list.setCurrentRow(new_pos)
+        self._list.blockSignals(False)
+        self._relabel()
+        self.selectionChanged.emit()
+
+    def _on_rows_moved(self, *_args) -> None:
+        self._relabel()
+        self.selectionChanged.emit()
+
+    def _on_item_changed(self, _item: QListWidgetItem) -> None:
+        self._sync_master()
+        self.selectionChanged.emit()
 
     def _on_master_clicked(self) -> None:
         # A tri-state master must drive children to a definite state, never
         # leave them Partially — clicking it always means "all" or "none".
-        target = self._master.checkState() != Qt.CheckState.Unchecked
-        for _, box in self._boxes:
-            box.blockSignals(True)
-            box.setChecked(target)
-            box.blockSignals(False)
-        self._sync_master()
-        self.selectionChanged.emit()
-
-    def _on_child_changed(self, _state: int) -> None:
+        target = (
+            Qt.CheckState.Checked
+            if self._master.checkState() != Qt.CheckState.Unchecked
+            else Qt.CheckState.Unchecked
+        )
+        self._list.blockSignals(True)
+        for i in range(self._list.count()):
+            self._list.item(i).setCheckState(target)
+        self._list.blockSignals(False)
         self._sync_master()
         self.selectionChanged.emit()
 
     def _sync_master(self) -> None:
-        total = len(self._boxes)
-        checked = sum(1 for _, box in self._boxes if box.isChecked())
+        total = self._list.count()
+        checked = sum(
+            1 for i in range(total)
+            if self._list.item(i).checkState() == Qt.CheckState.Checked
+        )
         self._master.blockSignals(True)
         if total and checked == total:
             self._master.setCheckState(Qt.CheckState.Checked)
