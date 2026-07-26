@@ -10,6 +10,16 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-14-chapter-order-and-names-design.md`
 
+## Execution split (verified against the tree 2026-07-26)
+
+| Task | Who |
+|---|---|
+| 1 | **Already committed** (`f61ba5f`) — skip entirely |
+| 2, 3, 4, 5 | Subagent-safe; independent of each other |
+| 6 (Steps 1–6) | Subagent-safe; stops before the commit |
+| **6b** | **Main session only** — needs the user at a display |
+| 7 | Subagent-safe, but must run **after 6b** (its class-grep list depends on the committed `wizard_widgets.py`) |
+
 ## Global Constraints
 
 - All colours come from `bookweaver.json` / `wizard_theme.py` — never hardcode hex values (CLAUDE.md rule 2).
@@ -17,48 +27,39 @@
 - Max line length 100; lint gate: `pycodestyle --config=.pycodestyle --statistics <files>` must introduce **no new violations**. Every touched file is currently clean EXCEPT `worker.py`, whose accepted baseline is exactly: `728:101 E501` + W503 at `753, 754, 799, 897` (line numbers may shift by edits above them; the count — 1×E501, 4×W503 — must not grow). Never edit `.pycodestyle`.
 - After any edit touching a class boundary run `grep -n "^class " *.py` and compare against the CLAUDE.md list (Task 7 updates that list).
 - Test suite: `python -m pytest tests/ -q`. Exactly one pre-existing failure is expected and NOT ours: `test_settings.py::TestOllamaTimeout::test_defaults_when_missing`.
-- Python environment: uv venv — if anything needs installing use `uv pip install`, never bare `pip`.
-- Original `app.py` behaviour must remain byte-identical (it sends sorted indices and never sets `chapter_numbering`).
+- Python environment: uv venv — if anything needs installing use `uv pip install`, never bare `pip`. Verified 2026-07-26: Python 3.14.3, PyQt6 6.11.0, ebooklib 0.20, pycodestyle 2.14.0 — nothing needs installing for this plan.
+- Original `app.py` behaviour must remain byte-identical (verified: `widgets.ChapterListWidget.selected_indices()` returns `sorted(...)`, and `app._build_config` never sets `chapter_numbering`).
+- Stage the exact files each task lists. Never `git add -A` / `git add .` / `git commit -a` — `docs/todo.txt` is modified and belongs to the user, not this feature.
+- Baseline confirmed 2026-07-26: `python -m pytest tests/ -q` → 324 passed, 1 failed (`test_settings`, pre-existing). Lint over every file this plan touches → exactly the `worker.py` baseline above, nothing else.
+- **No subagent may run a GUI script** (`python wizard.py`, `python main.py`, `scripts/verify_chapter_drag.py`). `app.exec()` blocks until the window is closed, so the Bash call never returns. Only `scripts/verify_chapter_list.py` is agent-safe — it is offscreen and exits on its own. Task 6b is main-session-only for this reason.
+- `epub_io.select_chapters` has exactly one production caller — `worker.py:148` (verified by `grep -rn "select_chapters" *.py tests/*.py`; the only other hit is a stale docstring reference in `wizard_logic.py:78`, which Task 4 fixes).
 
 ---
 
-### Task 1: Commit the pending spine-order bugfix
+### Task 1: ~~Commit the pending spine-order bugfix~~ — ALREADY DONE, SKIP
 
-The working tree already contains a reviewed, test-covered bugfix (uncommitted): `extract_chapters` now iterates the spine instead of the manifest. This feature builds on top of it; commit it first so feature commits stay clean. **Do not commit `docs/todo.txt`** (unrelated user edit).
+**Do not run this task.** The spine-order bugfix (`epub_io._spine_documents`,
+`extract_chapters` iterating the spine) was committed on 2026-07-15 as
+`f61ba5f "stuff"`, together with its tests. Verified: the working tree is clean
+apart from an unrelated `docs/todo.txt` edit.
 
-**Files:**
-- Commit (already modified): `epub_io.py`, `tests/test_epub_io.py`
+Later tasks may assume `_spine_documents` exists and `extract_chapters` returns
+spine order — it does.
 
-**Interfaces:**
-- Produces: `epub_io._spine_documents(book) -> list` (docs in spine order, manifest fallback); `extract_chapters` returning chapters in spine order. Later tasks assume this is committed.
+**⚠️ `docs/todo.txt` is modified and is NOT part of this feature.** Never
+`git add -A` / `git add .` / `git commit -a` in any task below; always stage the
+exact files each task lists.
 
-- [ ] **Step 1: Verify the tree state and tests**
-
-Run: `git status --short && python -m pytest tests/test_epub_io.py -q`
-Expected: `M epub_io.py`, `M tests/test_epub_io.py`, `M docs/todo.txt` (leave alone); all epub_io tests PASS.
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add epub_io.py tests/test_epub_io.py
-git commit -m "fix(epub_io): extract chapters in spine (reading) order, not manifest order
-
-The OPF manifest is an unordered inventory; some publishers list front
-matter after the body (books/mattering_too), misordering every output.
-Reading order is defined by the spine. Falls back to manifest order when
-the spine is empty or unresolvable.
-
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
-```
+Task numbering is left unchanged so cross-references between tasks stay valid.
 
 ---
 
-### Task 2: Pin nav-only chapter names + bump ebooklib floor
+### Task 2: Pin nav chapter names + nav-over-NCX precedence + bump ebooklib floor
 
-ebooklib 0.20 already parses the EPUB3 `nav.xhtml` TOC into `book.toc` (verified by probe; nav title wins when both NCX and nav exist). No BookWeaver code change — add a regression test pinning the behaviour and raise the dependency floor so fresh installs get it.
+ebooklib 0.20 already parses the EPUB3 `nav.xhtml` TOC into `book.toc` (re-verified by probe on 2026-07-26 against the installed 0.20: nav-only → `['Real Name']`; NCX+nav conflict → `_flatten_toc` gives `{'c1.xhtml': 'Nav Name'}`, i.e. nav wins). No BookWeaver code change — add two regression tests pinning the behaviour and raise the dependency floor so fresh installs get it.
 
 **Files:**
-- Modify: `tests/test_epub_io.py` (append a test class)
+- Modify: `tests/test_epub_io.py` (append a test class with two tests)
 - Modify: `pyproject.toml:12` (`ebooklib>=0.18` → `ebooklib>=0.20`)
 - Modify: `requirements.txt:2` (`ebooklib>=0.18` → `ebooklib>=0.20`)
 
@@ -99,12 +100,44 @@ class TestNavOnlyTitles:
 
         chapters = extract_chapters(str(path))
         assert [c.title for c in chapters] == ["Real Name"]
+
+    def test_nav_title_wins_over_ncx(self, tmp_path):
+        """When a book ships BOTH an NCX and a nav TOC with conflicting
+        titles, ebooklib 0.20 hands us the NAV title in book.toc. Spec
+        section 5 asks this precedence be pinned — it is the surprising
+        half of the amendment, and a future ebooklib flipping it would
+        silently change every chapter name in such books."""
+        book = epub.EpubBook()
+        book.set_identifier("id123")
+        book.set_title("Fixture Book")
+        book.set_language("en")
+        c1 = epub.EpubHtml(file_name="c1.xhtml", lang="en")
+        c1.content = BODY                      # no headings, no <title>
+        book.add_item(c1)
+        nav = epub.EpubHtml(file_name="nav.xhtml", lang="en")
+        nav.content = (
+            '<nav epub:type="toc"><ol>'
+            '<li><a href="c1.xhtml">Nav Name</a></li></ol></nav>'
+        )
+        nav.properties.append("nav")
+        book.add_item(nav)
+        book.toc = (epub.Link("c1.xhtml", "NCX Name", "c1"),)
+        book.add_item(epub.EpubNcx())          # writes 'NCX Name' to toc.ncx
+        book.spine = [c1]
+        path = tmp_path / "both.epub"
+        epub.write_epub(str(path), book)
+
+        chapters = extract_chapters(str(path))
+        assert [c.title for c in chapters] == ["Nav Name"]
 ```
 
-- [ ] **Step 2: Run it — expected PASS (this is a pin, not TDD red-green)**
+- [ ] **Step 2: Run it — expected PASS (these are pins, not TDD red-green)**
 
 Run: `python -m pytest tests/test_epub_io.py::TestNavOnlyTitles -v`
-Expected: PASS. If it FAILS, stop — the environment's ebooklib does not parse nav TOCs and the spec amendment's premise is wrong; report back instead of patching.
+Expected: both tests PASS (verified by probe against ebooklib 0.20 before this
+plan was handed over — `_flatten_toc` yields `{'c1.xhtml': 'Nav Name'}` for the
+conflict fixture). If either FAILS, stop — the environment's ebooklib does not
+behave as the spec amendment assumes; report back instead of patching.
 
 - [ ] **Step 3: Bump the dependency floor**
 
@@ -120,7 +153,7 @@ Expected: only the pre-existing `test_settings` failure; lint clean.
 
 ```bash
 git add tests/test_epub_io.py pyproject.toml requirements.txt
-git commit -m "test(epub_io): pin nav-only TOC titles; require ebooklib>=0.20
+git commit -m "test(epub_io): pin nav TOC titles and nav-over-NCX precedence; require ebooklib>=0.20
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -453,7 +486,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 Rework `TriStateChapterList` (`wizard_widgets.py:507-590`) from a QVBoxLayout of QCheckBoxes onto a QListWidget with drag-and-drop (`InternalMove`) plus per-row ▲▼ buttons, and live `NN.` renumbering. Public API is preserved (`set_chapters`, `rows`, `clear`, `selectionChanged`) so `StepBook` (`wizard_steps.py`) needs **no changes**. pytest stubs PyQt6, so behaviour is verified with an offscreen script.
 
 **Known Qt pitfalls this design already accounts for (do not "simplify" them away):**
-- After an `InternalMove` drag, Qt serializes/recreates the moved item and **drops its `setItemWidget` widget** — `_relabel()` re-creates every row's button widget after each move.
+- `_relabel()` re-creates every row's button widget after each move, **unconditionally**. Probed on this machine (PyQt6 6.11): `model().moveRow` preserves both the `setItemWidget` widgets and the Python `ChapterRow` stored in `UserRole`, and even a mime round-trip preserves the frozen dataclass. The real drop path can't be probed offscreen, so the design must not depend on which of the two Qt takes — re-creating every time is correct either way. Do not "optimise" `_relabel` into a partial update.
 - `setItemWidget` spans the full item rect; the container must stay background-transparent with a leading stretch so the item's own checkbox/text show through and clicks/drags on the non-button area propagate to the viewport.
 - Items must NOT have `ItemIsDropEnabled`, otherwise a drag can drop *onto* a row and nest/swallow it.
 - `setText`/`setCheckState` fire `itemChanged` — wrap programmatic mutations in `blockSignals(True/False)` on the QListWidget.
@@ -461,7 +494,9 @@ Rework `TriStateChapterList` (`wizard_widgets.py:507-590`) from a QVBoxLayout of
 **Files:**
 - Modify: `wizard_widgets.py` (imports ~lines 13-29; replace class at 507-590; add `_RowMoveButtons` before it)
 - Modify: `wizard_theme.py` (~line 214-225: extend checkbox indicator rules to QListView)
+- Create: `scripts/` (directory does not exist yet)
 - Create: `scripts/verify_chapter_list.py` (offscreen verification, committed for reuse)
+- Create: `scripts/verify_chapter_drag.py` (Step 7's on-display drag check, committed for reuse)
 
 **Interfaces:**
 - Consumes: `wl.ChapterRow` (frozen dataclass; `dataclasses.replace` already imported in wizard_widgets), `W_INSET`, `W_BORDER`, `W_ROW_HOVER`, `W_MUTED`, `W_TEXT_SECONDARY` from wizard_theme.
@@ -519,8 +554,13 @@ check("button move: order", [r.index for r in lst.rows()] == [0, 1, 3, 2])
 check("button move: relabel", lst._list.item(2).text() == "03.  Epilogue")
 check("button move: emits selectionChanged", len(emitted) == 1)
 
-# Drag-and-drop path: model().moveRow triggers the same rowsMoved handler
-# Qt fires after an InternalMove drop. Move row 2 (Epilogue) to the top.
+# "Drag" path — CAVEAT: this calls model().moveRow directly, which is
+# VERIFIED to emit rowsMoved (probed, PyQt6 6.11). It does NOT prove that a
+# real InternalMove DROP takes the same route: QListWidget::dropEvent might
+# instead take/insert rows, which emits rowsInserted/rowsRemoved and would
+# leave _on_rows_moved dead (labels stop renumbering after a drag while every
+# check here still prints PASS). Only Step 7 can settle that — do not treat a
+# green run of this script as proof the drag path works.
 emitted.clear()
 lst._list.model().moveRow(QModelIndex(), 2, QModelIndex(), 0)
 check("drag move: order", [r.index for r in lst.rows()] == [3, 0, 1, 2])
@@ -593,18 +633,19 @@ from dataclasses import replace
 from functools import partial
 ```
 
-and extend the QtWidgets import to include `QAbstractItemView, QListWidget, QListWidgetItem, QToolButton` (keep the existing names, alphabetical order, line length ≤ 100):
+and extend the QtWidgets import to include `QAbstractItemView, QListWidget, QListWidgetItem, QToolButton` while dropping the now-unused `QScrollArea` (keep the other existing names, alphabetical order, line length ≤ 100):
 
 ```python
 from PyQt6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QRadioButton,
-    QScrollArea, QSizePolicy, QSlider, QTextEdit, QToolButton, QVBoxLayout,
-    QWidget,
+    QSizePolicy, QSlider, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 ```
 
-Extend the wizard_theme import with `W_TEXT_SECONDARY` if not already imported (it is — see line 27). `QScrollArea` remains used by other widgets; do not remove it.
+Extend the wizard_theme import with `W_TEXT_SECONDARY` if not already imported (it is — see line 27).
+
+**Remove `QScrollArea` from the QtWidgets import** (shown removed in the block above). Verified: `wizard_widgets.py:529`, inside the class this task replaces, is its ONLY use in the module — leaving it behind is a dead import that pycodestyle does not flag. Confirm after the edit with `grep -n QScrollArea wizard_widgets.py` → no output.
 
 (b) Replace the entire `TriStateChapterList` class (lines 507-590) with `_RowMoveButtons` + the new implementation:
 
@@ -807,18 +848,76 @@ Expected: every line `PASS`, `exit=0`. Open `/tmp/chapter_list.png` (Read tool) 
 
 - [ ] **Step 6: Full suite + lint + class boundaries**
 
-Run: `python -m pytest tests/ -q && pycodestyle --config=.pycodestyle --statistics wizard_widgets.py wizard_theme.py scripts/verify_chapter_list.py && grep -n "^class " wizard_widgets.py`
+Run: `python -m pytest tests/ -q && pycodestyle --config=.pycodestyle --statistics wizard_widgets.py wizard_theme.py scripts/*.py && grep -n "^class " wizard_widgets.py`
+
+(`scripts/` does not exist yet — create it when writing the first script.)
 Expected: only the pre-existing `test_settings` failure; lint clean; class list = `Card, Note, _ProgressPill, RunConsole, _SliderTrack, WizardSlider, _ClickableLabel, _ClickableTile, StepRail, ModeTileGrid, _RowMoveButtons, TriStateChapterList` (all `(Q...)` bases intact).
 
-- [ ] **Step 7: Launch the wizard for a real drag check**
+**🛑 STOP HERE AND REPORT — this is the end of the subagent's scope.** Do not commit; Task 6b below is executed by the main session with the user at the display. Report: the script's PASS/FAIL lines, the lint result, the class list, and anything you had to deviate on.
 
-Run: `python wizard.py` (needs the user's display; if running unattended, skip and note it in the handoff — the drag path is the one thing offscreen can't fully prove).
-Expected: import `books/mattering_too/Mattering_-_Jennifer_Breheny_Wallace.epub`, drag a row by its text area, watch labels renumber; ▲▼ move single steps; "n / m selected" meta stays correct.
+---
 
-- [ ] **Step 8: Commit**
+### Task 6b: Real drag verification + commit (MAIN SESSION ONLY — needs the display)
+
+**Do not dispatch this to a subagent.** Both steps need a human at a GUI window, and `app.exec()` blocks until the window is closed — a Bash call on it hangs the agent forever.
+
+- [ ] **Step 1: Write the drag-tracing script**
+
+Create `scripts/verify_chapter_drag.py`. Note the `sys.path` insert and the `# noqa: E402` comments — they mirror `verify_chapter_list.py` and are required, both so `import epub_io` resolves (running `python scripts/x.py` puts `scripts/` on `sys.path[0]`, **not** the repo root) and so the lint run in Step 3 stays clean:
+
+```python
+"""Manual drag check: prints which model signal a real drop emits.
+    python scripts/verify_chapter_drag.py <book.epub>
+Drag ONE row, then read the SIGNAL lines and the relabelled list."""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from PyQt6.QtWidgets import QApplication  # noqa: E402
+
+import epub_io  # noqa: E402
+import wizard_logic as wl  # noqa: E402
+from wizard_widgets import TriStateChapterList  # noqa: E402
+
+app = QApplication([])
+lst = TriStateChapterList()
+lst.set_chapters([wl.ChapterRow(c.index, c.title, True)
+                  for c in epub_io.extract_chapters(sys.argv[1])])
+for name in ("rowsMoved", "rowsInserted", "rowsRemoved"):
+    getattr(lst._list.model(), name).connect(
+        lambda *a, n=name: print("SIGNAL", n)
+    )
+lst.selectionChanged.connect(
+    lambda: print("labels:",
+                  [lst._list.item(i).text().split(".")[0]
+                   for i in range(lst._list.count())])
+)
+lst.resize(520, 400)
+lst.show()
+app.exec()
+```
+
+- [ ] **Step 2: Run the drag check — DISCRIMINATING, NOT IMPRESSIONISTIC**
+
+Run: `python scripts/verify_chapter_drag.py books/mattering_too/Mattering_-_Jennifer_Breheny_Wallace.epub` (verified present). A window must open — a traceback means the `sys.path` insert is wrong. Drag ONE row by its text area, then read the output.
+
+The two tracers are deliberately independent: the three `SIGNAL` lines are connected to the **model**, so they print whether or not `_on_rows_moved` is alive; the `labels:` line only prints when `selectionChanged` fired, i.e. when a relabel actually happened.
+
+**Interpretation — this decides whether more work is needed:**
+- `SIGNAL rowsMoved` **and** a `labels:` line, numbers renumbered → the design is correct. Done; record the result.
+- `SIGNAL rowsInserted`/`rowsRemoved` with **no** `labels:` line → that is the failure signature, not a broken script: `_on_rows_moved` is dead on the drag path. **STOP and report to the user before fixing.** The correct fix is drop-scoped, not signal-broadening: a small `QListWidget` subclass whose `dropEvent` calls `super().dropEvent(e)` then the owner's `_relabel()` + emit. Do **not** additionally connect `rowsInserted`/`rowsRemoved` on the model — `blockSignals(True)` on a QListWidget does not block its *model's* signals, so `set_chapters` would fire N relabels and N `selectionChanged` emissions during populate and `_move_item` would double-emit, breaking the `len(emitted) == 1` check in Task 6 Step 1. Adding the subclass also changes the expected class lists in Task 6 Step 6 and in Task 7 Step 3.
+
+Also confirm by eye in the same window: ▲▼ move single steps and labels renumber live. Then run the full wizard once (`python wizard.py`), import the same book, and confirm the "n / m selected" meta stays correct across a reorder.
+
+- [ ] **Step 3: Lint the new script, then commit**
+
+Run: `pycodestyle --config=.pycodestyle --statistics scripts/verify_chapter_drag.py`
+Expected: clean (Task 6 Step 6's lint ran before this file existed, so this is its only gate).
 
 ```bash
-git add wizard_widgets.py wizard_theme.py scripts/verify_chapter_list.py
+git add wizard_widgets.py wizard_theme.py \
+        scripts/verify_chapter_list.py scripts/verify_chapter_drag.py
 git commit -m "feat(wizard): drag + ▲▼ chapter reordering with live renumbering
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
@@ -851,6 +950,7 @@ and add a new row after `backend`:
 - [ ] **Step 2: CLAUDE.md — file map + per-chapter file description**
 
 - In the file map row for `wizard_logic.py`, change "the 22-key `build_config` worker contract" to "the 23-key `build_config` worker contract".
+- In the file map row for `wizard_widgets.py`, change "(sliders, tiles, rail, console)" to "(sliders, tiles, rail, console, reorderable chapter list)" — spec §6 asks for the `TriStateChapterList` description to be updated, and the file map currently does not mention it at all.
 - In the "Per chapter" pipeline section, step 4 ("Per-chapter file (txt only)"), change "where `NN` is `index + 1` (the number shown in the UI chapter list)" to "where `NN` is `index + 1` for `chapter_numbering: "book"` or the processing position + 1 for `"position"` — either way the number shown in that frontend's chapter list".
 - In "What this project does" nothing changes (mode descriptions are order-agnostic).
 
@@ -859,12 +959,20 @@ and add a new row after `backend`:
 Run: `grep -n "^class " *.py`
 Replace the expected-output block in the "Known historical issues" section with the actual current output (it gains `wizard_widgets.py:…:class _RowMoveButtons(QWidget):` and all shifted line numbers).
 
-- [ ] **Step 4: README.md — feature row**
+- [ ] **Step 4: README.md — feature row + title resolution**
 
-Replace the Chapter selection row:
+Replace the Chapter selection row (`README.md:36`):
 
 ```markdown
 | Chapter selection | Scrollable checklist of every chapter with a tri-state "Select all"; process any subset (≥1 required). The wizard frontend additionally supports reordering chapters (drag-and-drop or ▲▼) — processing, all output formats, and the MP3 follow the custom order |
+```
+
+Spec §6 also asks that the title-resolution sources be documented. README has no dedicated line for it; the only mention is the file-tree entry at `README.md:105`. Replace it:
+
+```markdown
+├── epub_io.py            EPUB → ordered Chapter list (titles from the book's
+│                         TOC — NCX and/or EPUB3 nav — then headings, then a
+│                         text preview; scene breaks)
 ```
 
 - [ ] **Step 5: Verify docs claims against reality**
