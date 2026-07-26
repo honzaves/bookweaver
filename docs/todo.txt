@@ -4,3 +4,4 @@
 - next step blocked when no book or destination folder selected
 
 - remove the old UI
+- book file name wrong
