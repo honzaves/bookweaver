@@ -105,8 +105,9 @@ processing order — MP3 order follows automatically (verified at
 ## 5. Testing
 
 - `test_epub_io.py`: nav-TOC title extraction (fixture EPUB with a
-  nav-only TOC); NCX-wins-over-nav merge; `select_chapters` honours the
-  given order (replaces `test_filters_and_preserves_order`).
+  nav-only TOC); nav-wins-over-NCX merge (per the §1 amendment, the nav
+  title takes precedence when both TOCs are present); `select_chapters`
+  honours the given order (replaces `test_filters_and_preserves_order`).
 - `test_wizard_logic.py`: `build_config` emits `selected_chapters` in
   row order; contract count 23; `chapter_numbering: "position"`.
 - `test_worker.py`: `_write_chapter_file` numbering under both

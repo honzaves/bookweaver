@@ -577,7 +577,10 @@ class ProcessingWorker(QThread):
     ) -> Path:
         """Write a single chapter's result to
         {stem}_ES_{level}_chapters/{NN} - {title}.txt and return the path.
-        NN = index + 1, matching the number shown in the UI chapter list."""
+        NN = index + 1; which index the caller passes depends on
+        chapter_numbering — chapter.index under "book" (the default), the
+        0-based processing position under "position" — so NN matches the
+        chapter list of whichever frontend launched the run."""
         chapters_dir = out_folder / f"{stem}_ES_{level}_chapters"
         chapters_dir.mkdir(parents=True, exist_ok=True)
         fname = f"{index + 1:02d} - {self._safe_filename(title)}.txt"
