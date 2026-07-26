@@ -185,8 +185,13 @@ class TestSelectChapters:
     def test_none_returns_all(self):
         assert select_chapters(self.CH, None) == self.CH
 
-    def test_filters_and_preserves_order(self):
+    def test_returns_chapters_in_given_order(self):
         out = select_chapters(self.CH, [2, 0])
+        assert [c.index for c in out] == [2, 0]
+
+    def test_sorted_indices_keep_document_order(self):
+        # app.py sends sorted indices; its behaviour must stay identical.
+        out = select_chapters(self.CH, [0, 2])
         assert [c.index for c in out] == [0, 2]
 
     def test_ignores_unknown_indices(self):

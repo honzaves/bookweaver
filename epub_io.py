@@ -153,9 +153,12 @@ def extract_chapters(path: str, preview_chars: int = 50,
 
 def select_chapters(chapters: list[Chapter],
                     indices: Iterable[int] | None) -> list[Chapter]:
-    """Filter *chapters* to those whose .index is in *indices*, preserving
-    document order. `indices is None` means 'all chapters'."""
+    """Filter *chapters* to those whose .index is in *indices*, returned in
+    the order the indices are listed — the wizard's custom processing order.
+    (app.py passes sorted indices, so its runs keep document order.)
+    Unknown indices are ignored. `indices is None` means 'all chapters,
+    document order'."""
     if indices is None:
         return chapters
-    wanted = set(indices)
-    return [c for c in chapters if c.index in wanted]
+    by_index = {c.index: c for c in chapters}
+    return [by_index[i] for i in indices if i in by_index]
