@@ -33,7 +33,7 @@ top.
 | Model selection | Dropdown loaded from `bookweaver.json` — no code changes to add models |
 | CEFR levels | B1 · B2 · C1 · C2 |
 | Processing mode | **Summarise → Rewrite**, **Full translation**, **Summarise only** (English, no translation), or **Summary with key ideas** |
-| Chapter selection | Scrollable checklist of every chapter with a tri-state "Select all"; process any subset (≥1 required) |
+| Chapter selection | Scrollable checklist of every chapter with a tri-state "Select all"; process any subset (≥1 required). The wizard frontend additionally supports reordering chapters (drag-and-drop or ▲▼) — processing, all output formats, and the MP3 follow the custom order |
 | Condensation slider | Keep 10–90 % of each chapter; visible in every mode except Full translation |
 | Creativity slider | 1–10 scale controlling LLM elaboration freedom and Ollama temperature |
 | Chapter chunking | Long chapters are split at paragraph boundaries into configurable-size chunks, processed independently, then rejoined |
@@ -102,7 +102,9 @@ bookweaver/
 ├── main.py               Entry point — creates QApplication and main window
 ├── app.py                BookWeaverApp (QMainWindow) — all UI wiring
 ├── worker.py             ProcessingWorker (QThread) — pipeline logic
-├── epub_io.py            EPUB → ordered Chapter list (titles, scene breaks)
+├── epub_io.py            EPUB → ordered Chapter list (titles from the book's
+│                         TOC — NCX and/or EPUB3 nav — then headings, then a
+│                         text preview; scene breaks)
 ├── prompts.py            LLM prompt builders
 ├── widgets.py            Reusable custom Qt widgets
 ├── settings.py           Config loader — reads bookweaver.json, builds stylesheet

@@ -39,8 +39,8 @@ boundaries, processed independently, and rejoined.
 | `widgets.py` | All reusable Qt widgets | For new/changed widgets |
 | `wizard.py` | **New wizard frontend** entry point + shell (`python wizard.py`). Coexists with `main.py`/`app.py` | For wizard shell/nav changes |
 | `wizard_theme.py` | Wizard palette (`wizard_colors` in JSON), stylesheet, Caveat font | For wizard styling |
-| `wizard_logic.py` | Pure, Qt-free wizard state + the 22-key `build_config` worker contract | For wizard behaviour changes |
-| `wizard_widgets.py` | Wizard's custom-painted widgets (sliders, tiles, rail, console) | For new/changed wizard widgets |
+| `wizard_logic.py` | Pure, Qt-free wizard state + the 23-key `build_config` worker contract | For wizard behaviour changes |
+| `wizard_widgets.py` | Wizard's custom-painted widgets (sliders, tiles, rail, console, reorderable chapter list) | For new/changed wizard widgets |
 | `wizard_steps.py` | One QWidget per wizard step | For step content changes |
 | `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
 | `tts.py` | Kokoro TTS → MP3 audiobook with ID3 chapters; optional deps behind an import gate | For TTS/audio changes |
@@ -133,7 +133,7 @@ All user-editable values live in `bookweaver.json`:
 | `chunk_size` | `int` | Max words per chunk (default 2 000) |
 | `keep_pct` | `int` | Condensation % — used in `summarise_rewrite` and `summarise_only` modes |
 | `out_format` | `list[str]` | One or more of `"txt"`, `"epub"`, `"html"` — all selected formats are written |
-| `selected_chapters` | `list[int]` | Indices (into the extracted chapter list) the user ticked; the worker processes only these. `None`/absent means all |
+| `selected_chapters` | `list[int]` | Indices (into the extracted chapter list) the user ticked, **in processing order** — the wizard lets the user reorder rows and the worker processes in list order (`epub_io.select_chapters` honours it). `app.py` sends sorted indices (book order). `None`/absent means all |
 | `creativity` | `int` | 1–10 scale; controls temperature and prose directives |
 | `level` | `str` | CEFR level: `"B1"`, `"B2"`, `"C1"`, or `"C2"` |
 | `generate_mp3` | `bool` | Synthesise an MP3 audiobook after the text output (requires `"txt"` in `out_format` and the optional Kokoro install — see `kokoro.md`) |
@@ -141,6 +141,7 @@ All user-editable values live in `bookweaver.json`:
 | `carry_mode` | `str` | `"off"` (default), `"glossary"`, `"prose"`, or `"both"` — cross-chunk continuity. `glossary` only affects chapters split into multiple chunks; `prose`/`both` also hard-segment any chapter at scene breaks, which can turn a single-chunk chapter into several (see below) |
 | `target_lang` | `str` | `"es"` or `"en"` — from `TARGET_LANG[mode]` in `settings.py`; selects the voice list and Kokoro language |
 | `backend` | `str` | `"mlx"` or `"ollama"` — captured from `SETTINGS["llm_backend"]` at start time so resume never flips backends mid-book |
+| `chapter_numbering` | `str` | `"book"` (default; per-chapter txt files numbered `chapter.index + 1`) or `"position"` (numbered by processing position — the wizard sets this so file numbers match its reordered list) |
 
 ### Per chapter
 
@@ -178,7 +179,9 @@ All user-editable values live in `bookweaver.json`:
 4. **Per-chapter file (txt only)** — once a chapter completes, if `"txt"` is in
    `out_format`, its result is also written to
    `{stem}_ES_{level}_chapters/{NN} - {title}.txt` (all modes), where `NN` is
-   `index + 1` (the number shown in the UI chapter list). Both this file and the
+   `index + 1` for `chapter_numbering: "book"` or the processing position + 1
+   for `"position"` — either way the number shown in that frontend's chapter
+   list. Both this file and the
    assembled `.txt` use the shared `ProcessingWorker._chapter_block` formatter,
    so their per-chapter formatting stays identical. The assembled `.txt` is
    still written normally after all chapters.
@@ -336,24 +339,25 @@ widgets.py:286:class LogWidget(QTextEdit):
 widgets.py:314:class ProgressBar(QWidget):
 widgets.py:358:class ChapterListWidget(QWidget):
 wizard.py:36:class WizardWindow(QMainWindow):
-wizard_logic.py:76:class ChapterRow:
-wizard_logic.py:93:class WizardState:
+wizard_logic.py:74:class ChapterRow:
+wizard_logic.py:92:class WizardState:
 wizard_steps.py:48:class StepBook(QWidget):
-wizard_steps.py:175:class _Reveal:
-wizard_steps.py:250:class StepTransform(QWidget):
-wizard_steps.py:405:class StepOutput(QWidget):
-wizard_steps.py:643:class StepRun(QWidget):
-wizard_widgets.py:32:class Card(QFrame):
-wizard_widgets.py:63:class Note(QFrame):
-wizard_widgets.py:81:class _ProgressPill(QWidget):
-wizard_widgets.py:111:class RunConsole(QWidget):
-wizard_widgets.py:164:class _SliderTrack(QWidget):
-wizard_widgets.py:180:class WizardSlider(QWidget):
-wizard_widgets.py:345:class _ClickableLabel(QLabel):
-wizard_widgets.py:354:class _ClickableTile(QFrame):
-wizard_widgets.py:366:class StepRail(QWidget):
-wizard_widgets.py:440:class ModeTileGrid(QWidget):
-wizard_widgets.py:507:class TriStateChapterList(QWidget):
+wizard_steps.py:187:class _Reveal:
+wizard_steps.py:262:class StepTransform(QWidget):
+wizard_steps.py:417:class StepOutput(QWidget):
+wizard_steps.py:667:class StepRun(QWidget):
+wizard_widgets.py:34:class Card(QFrame):
+wizard_widgets.py:65:class Note(QFrame):
+wizard_widgets.py:83:class _ProgressPill(QWidget):
+wizard_widgets.py:113:class RunConsole(QWidget):
+wizard_widgets.py:166:class _SliderTrack(QWidget):
+wizard_widgets.py:182:class WizardSlider(QWidget):
+wizard_widgets.py:347:class _ClickableLabel(QLabel):
+wizard_widgets.py:356:class _ClickableTile(QFrame):
+wizard_widgets.py:368:class StepRail(QWidget):
+wizard_widgets.py:442:class ModeTileGrid(QWidget):
+wizard_widgets.py:509:class _RowMoveButtons(QWidget):
+wizard_widgets.py:547:class TriStateChapterList(QWidget):
 worker.py:37:class ProcessingWorker(QThread):
 ```
 
