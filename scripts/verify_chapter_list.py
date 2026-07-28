@@ -8,7 +8,10 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QModelIndex, Qt  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from PyQt6.QtTest import QTest  # noqa: E402
+from PyQt6.QtWidgets import (  # noqa: E402
+    QApplication, QStyle, QStyleOptionViewItem,
+)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import wizard_logic as wl  # noqa: E402
@@ -78,6 +81,57 @@ check("bottom row ▼ disabled",
 # rows() round-trips through set_chapters (StepBook load_from path).
 lst.set_chapters(lst.rows())
 check("round-trip keeps order", [r.index for r in lst.rows()] == [3, 0, 1, 2])
+
+# A REAL mouse click on the check indicator must toggle the row.
+# setCheckState() above proves the model side only; it cannot catch the
+# failure mode that setItemWidget introduces. Qt registers an item widget
+# as a PERSISTENT EDITOR for that index, and QAbstractItemView::edit()
+# returns early when an index has one — so the delegate that toggles the
+# check state never sees the release, and every checkbox goes dead even
+# though the ▲▼ overlay never covers the indicator.
+lst.show()          # geometry is only real once shown
+lst2 = lst
+
+
+def _indicator_center(i: int):
+    view = lst2._list
+    opt = QStyleOptionViewItem()
+    opt.initFrom(view)
+    opt.rect = view.visualRect(view.indexFromItem(view.item(i)))
+    opt.features |= QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+    return view.style().subElementRect(
+        QStyle.SubElement.SE_ItemViewItemCheckIndicator, opt, view).center()
+
+
+emitted.clear()
+before = lst._list.item(0).checkState()
+QTest.mouseClick(lst._list.viewport(), Qt.MouseButton.LeftButton,
+                 Qt.KeyboardModifier.NoModifier, _indicator_center(0))
+check("click on indicator toggles the row",
+      lst._list.item(0).checkState() != before)
+check("click toggle reaches rows()",
+      lst.rows()[0].checked == (before != Qt.CheckState.Checked))
+check("click toggle emits selectionChanged", len(emitted) == 1)
+
+# Clicking the row's TEXT must not toggle it — only the indicator does.
+emitted.clear()
+state = lst._list.item(1).checkState()
+text_point = lst._list.visualRect(
+    lst._list.indexFromItem(lst._list.item(1))).center()
+QTest.mouseClick(lst._list.viewport(), Qt.MouseButton.LeftButton,
+                 Qt.KeyboardModifier.NoModifier, text_point)
+check("click on text does not toggle",
+      lst._list.item(1).checkState() == state)
+
+# 'Select all' master, driven by a real click (it fires on `clicked`, so
+# setCheckState alone would never exercise _on_master_clicked).
+lst._master.setCheckState(Qt.CheckState.Unchecked)
+lst._master.click()
+check("master click checks every row",
+      all(r.checked for r in lst.rows()))
+lst._master.click()
+check("master click again unchecks every row",
+      not any(r.checked for r in lst.rows()))
 
 lst.grab().save("/tmp/chapter_list.png")
 print("screenshot -> /tmp/chapter_list.png")

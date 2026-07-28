@@ -14,12 +14,13 @@ import html
 from dataclasses import replace
 from functools import partial
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QRadioButton,
-    QSizePolicy, QSlider, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QSizePolicy, QSlider, QStyle, QStyleOptionViewItem, QTextEdit,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 import wizard_logic as wl
@@ -585,6 +586,10 @@ class TriStateChapterList(QWidget):
         # Fires after an InternalMove drop; also reachable programmatically
         # via model().moveRow (the offscreen script uses that).
         self._list.model().rowsMoved.connect(self._on_rows_moved)
+        # Restores the check-indicator click that setItemWidget breaks —
+        # see eventFilter(). Must be on the viewport: that is what
+        # receives item mouse events.
+        self._list.viewport().installEventFilter(self)
         layout.addWidget(self._list)
 
     # ── public API (unchanged from the pre-reorder widget) ──
@@ -627,6 +632,54 @@ class TriStateChapterList(QWidget):
         return out
 
     # ── internals ──
+    def eventFilter(self, obj, event) -> bool:
+        """Toggle a row's check state on an indicator click, ourselves.
+
+        Qt registers each row's ▲▼ widget (setItemWidget) as a PERSISTENT
+        EDITOR for that index, and QAbstractItemView::edit() returns early
+        whenever an index has one — so the delegate that would toggle the
+        checkbox never sees the release and EVERY row's checkbox goes dead.
+        The overlay does not have to cover the indicator for this to
+        happen, which is why it looks like a hit-testing bug and is not
+        one. Handling the press here restores the toggle (and stops a drag
+        starting from the checkbox, which is the behaviour we want anyway).
+        """
+        item = self._indicator_press_item(obj, event)
+        if item is None:
+            return super().eventFilter(obj, event)
+        checked = item.checkState() == Qt.CheckState.Checked
+        item.setCheckState(
+            Qt.CheckState.Unchecked if checked else Qt.CheckState.Checked
+        )
+        return True
+
+    def _indicator_press_item(self, obj, event) -> "QListWidgetItem | None":
+        """The item whose check indicator *event* pressed, else None.
+        (Stepwise early returns, not one chained condition: this project's
+        .pycodestyle enables BOTH W503 and W504, so a multi-line boolean
+        cannot break at its operators either way.)"""
+        if obj is not self._list.viewport():
+            return None
+        if event.type() != QEvent.Type.MouseButtonPress:
+            return None
+        if event.button() != Qt.MouseButton.LeftButton:
+            return None
+        pos = event.position().toPoint()
+        item = self._list.itemAt(pos)
+        if item is None:
+            return None
+        return item if self._indicator_rect(item).contains(pos) else None
+
+    def _indicator_rect(self, item: QListWidgetItem) -> QRect:
+        """Viewport rect of *item*'s check indicator, asked of the style so
+        it tracks the stylesheet's indicator size rather than guessing."""
+        opt = QStyleOptionViewItem()
+        opt.initFrom(self._list)
+        opt.rect = self._list.visualRect(self._list.indexFromItem(item))
+        opt.features |= QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+        return self._list.style().subElementRect(
+            QStyle.SubElement.SE_ItemViewItemCheckIndicator, opt, self._list)
+
     def _relabel(self) -> None:
         """Renumber every label to its display position and (re)attach the
         ▲▼ row widgets — Qt drops setItemWidget widgets on InternalMove, so
