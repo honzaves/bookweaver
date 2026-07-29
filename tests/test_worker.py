@@ -560,6 +560,57 @@ class TestExtractProperNouns:
     def test_empty_text(self):
         assert self.call("") == []
 
+    # ── precision guards ──────────────────────────────────────
+    # Whatever this returns is injected into the translation prompt as
+    # "Keep these names exactly as written: …". A shouted line of dialogue
+    # landing in that list is a literal instruction NOT to translate it —
+    # confirmed in production: 'YOU KILLED MY WIFE' came back untranslated
+    # in the Spanish output, and translated correctly once the glossary was
+    # removed. Junk here is far more costly than a missed name, because the
+    # prompts independently tell the model to keep proper nouns.
+
+    def test_shouted_dialogue_is_not_a_name(self):
+        names = self.call(
+            "He turned. “YOU KILLED MY WIFE!” he shouted at Brooks. "
+            "“YOU’RE GOING TO PAY FOR WHAT YOU DID!” Brooks said nothing."
+        )
+        assert "YOU KILLED MY WIFE" not in names
+        assert "YOU’RE GOING TO PAY FOR WHAT YOU DID" not in names
+        assert "Brooks" in names          # the actual name still survives
+
+    def test_capitalised_person_name_survives(self):
+        # Non-fiction sets bylines in caps; those ARE names and must stay.
+        names = self.call(
+            "SETH GODIN wrote the foreword. Later, SETH GODIN spoke."
+        )
+        assert "SETH GODIN" in names
+
+    def test_all_caps_section_heading_is_not_a_name(self):
+        names = self.call("POINTS TO REMEMBER\n\nThe chapter ends here.")
+        assert not any("POINTS TO REMEMBER" in n for n in names)
+
+    def test_span_never_crosses_a_line_break(self):
+        # \s+ between words used to match newlines, gluing a heading to the
+        # sentence below it ('Other Small Victories\nChapter'). A "name"
+        # containing a line break is always an artefact.
+        names = self.call("Small Victories\nChapter Seven began badly.")
+        assert not any("\n" in n for n in names)
+
+    def test_repeated_function_word_is_not_a_name(self):
+        # Sentence-initial function words trivially clear the "seen twice"
+        # bar; telling a translator to keep "And"/"But" verbatim is harmful.
+        names = self.call(
+            "And so it went. But then it stopped. And later, But again."
+        )
+        assert "And" not in names
+        assert "But" not in names
+
+    def test_long_span_is_not_a_name(self):
+        names = self.call(
+            "She read Other Small Victories Chapter Seven Again slowly."
+        )
+        assert not any(len(n.split()) > 4 for n in names)
+
 
 class TestSplitWithScenes:
     def _para(self, n):

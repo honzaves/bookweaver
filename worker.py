@@ -855,14 +855,58 @@ class ProcessingWorker(QThread):
         import re
         return re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'\1', text)
 
+    # Capitalised words that are never a name on their own. A single one of
+    # these clears the "seen capitalised twice" bar just by starting two
+    # sentences, and "keep 'And' exactly as written" is a harmful thing to
+    # tell a translator. Also used to tell shouted dialogue ("YOU KILLED MY
+    # WIFE") from a capitalised byline ("SETH GODIN"): only the former
+    # contains function words.
+    # Compared after _norm_word() strips apostrophes, so write them without:
+    # EPUB text uses curly apostrophes and "Don’t"/"I’M" must match here.
+    _NON_NAME_WORDS: frozenset[str] = frozenset("""
+        a an and are as at be because been before but by can cant could did
+        do does dont for from had has have he her here his how i if im in is
+        it its just like me my not now of on once one or our out she since
+        so some that thats the their them then there these they this those
+        to too two until was we were what when where which while who why
+        will with would you youre your
+        after all also am another any both come know say said see
+        swear than think turn up very sometimes maybe still most only no
+        lets wont wasnt didnt
+    """.split())
+
+    # Real names run to a few words ("New York Harbor"); anything longer is
+    # a sentence fragment the span regex ran together.
+    _MAX_NAME_WORDS = 4
+
     @staticmethod
-    def extract_proper_nouns(text: str) -> list[str]:
+    def _norm_word(word: str) -> str:
+        """Lowercase, letters only — so "Don’t", "DON'T" and "dont" all match
+        the same _NON_NAME_WORDS entry regardless of apostrophe style."""
+        return re.sub(r"[^a-z]", "", word.lower())
+
+    @classmethod
+    def _is_plausible_name(cls, token: str) -> bool:
+        """Reject spans that would poison the 'keep these names exactly as
+        written' prompt line: sentence fragments, and shouted dialogue."""
+        words = token.split()
+        if len(words) > cls._MAX_NAME_WORDS:
+            return False
+        return not any(
+            cls._norm_word(w) in cls._NON_NAME_WORDS for w in words
+        )
+
+    @classmethod
+    def extract_proper_nouns(cls, text: str) -> list[str]:
         """Heuristic proper-noun list from English *source* text. Multi-word
-        capitalised spans are always kept; single capitalised words are kept
-        only when they occur capitalised more than once (filtering most
-        sentence-initial noise). De-duplicated, order-preserved. No external
-        dependency — reinforces the name-passthrough the prompts already ask
-        for, so false negatives degrade gracefully."""
+        capitalised spans are kept; single capitalised words are kept only
+        when they occur capitalised more than once (filtering most
+        sentence-initial noise). Spans containing an English function word,
+        or longer than four words, are dropped — see _is_plausible_name.
+        De-duplicated, order-preserved. No external dependency — reinforces
+        the name-passthrough the prompts already ask for, so false negatives
+        degrade gracefully, whereas a false POSITIVE actively instructs the
+        model to leave that English text untranslated."""
         singles = re.findall(r"\b[A-Z][a-zA-Z'’-]+\b", text)
         counts: dict[str, int] = {}
         for w in singles:
@@ -871,13 +915,16 @@ class ProcessingWorker(QThread):
         ordered: list[str] = []
         seen: set[str] = set()
         # Walk the text once so multi-word spans and qualifying singles keep
-        # first-appearance order.
+        # first-appearance order. Words are joined by horizontal whitespace
+        # only: \s+ would run a heading into the sentence beneath it.
         for match in re.finditer(
-            r"\b[A-Z][a-zA-Z'’-]+(?:\s+[A-Z][a-zA-Z'’-]+)*\b", text
+            r"\b[A-Z][a-zA-Z'’-]+(?:[ \t]+[A-Z][a-zA-Z'’-]+)*\b", text
         ):
             token = match.group(0)
-            is_multiword = " " in token
+            is_multiword = " " in token or "\t" in token
             if not is_multiword and counts.get(token, 0) < 2:
+                continue
+            if not cls._is_plausible_name(token):
                 continue
             if token not in seen:
                 seen.add(token)
