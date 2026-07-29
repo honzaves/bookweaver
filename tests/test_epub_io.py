@@ -308,3 +308,57 @@ class TestFlattenInline:
             assert name in epub_io._BLOCK_ELEMENTS
         for name in ("i", "b", "span", "em", "a", "sup"):
             assert name not in epub_io._BLOCK_ELEMENTS
+
+
+class TestExtractFlattensInlineMarkup:
+    """End-to-end: the text handed to the worker must not be shredded."""
+
+    def test_chapter_text_has_no_markup_split_lines(self, tmp_path):
+        html = (
+            "<html><body>"
+            "<p>She read <i>The Long Goodbye</i> twice.</p>"
+            f"{BODY}"
+            "</body></html>"
+        )
+        path = _build_epub(tmp_path, [("c1.xhtml", html)])
+        text = extract_chapters(path)[0].text
+        assert "She read The Long Goodbye twice." in text
+        assert "The Long Goodbye\n" not in text
+
+    def test_split_word_is_rejoined_in_chapter_text(self, tmp_path):
+        html = f"<html><body><p>hyper<i>text</i> matters.</p>{BODY}</body></html>"
+        path = _build_epub(tmp_path, [("c1.xhtml", html)])
+        assert "hypertext matters." in extract_chapters(path)[0].text
+
+    def test_title_from_heading_is_not_truncated_by_markup(self, tmp_path):
+        # Before the fix the heading extracted as 'Conscious \nLeadership...'
+        # and the title came out cut at the markup boundary.
+        html = (
+            "<html><body><h1>Conscious <i>Leadership</i> Now</h1>"
+            f"{BODY}</body></html>"
+        )
+        path = _build_epub(tmp_path, [("c1.xhtml", html)])
+        assert extract_chapters(path)[0].title == "Conscious Leadership Now"
+
+    def test_scene_break_marking_still_works_through_inline_markup(self, tmp_path):
+        html = (
+            "<html><body><p>before</p><p><i>* * *</i></p><p>after</p>"
+            f"{BODY}</body></html>"
+        )
+        path = _build_epub(tmp_path, [("c1.xhtml", html)])
+        marked = extract_chapters(path, mark_scene_breaks=True)[0].text
+        assert epub_io.SCENE_BREAK in marked
+
+    def test_marked_and_plain_reads_still_agree_on_index_and_title(self, tmp_path):
+        # The parity that selected_chapters depends on: app.py extracts
+        # unmarked, worker.py extracts marked, and the two must line up.
+        html = (
+            "<html><body><h1>Chapter <i>One</i></h1>"
+            "<p>text with <span>inline</span> markup.</p>"
+            f"{BODY}</body></html>"
+        )
+        path = _build_epub(tmp_path, [("c1.xhtml", html)])
+        plain = extract_chapters(path)
+        marked = extract_chapters(path, mark_scene_breaks=True)
+        assert [(c.index, c.title) for c in plain] == \
+            [(c.index, c.title) for c in marked]

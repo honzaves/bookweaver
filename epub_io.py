@@ -173,6 +173,12 @@ def extract_chapters(path: str, preview_chars: int = 50,
     idx = 0
     for item in _spine_documents(book):
         soup = BeautifulSoup(item.get_content(), "html.parser")
+        # Before ANY get_text: inline markup otherwise splits sentences
+        # and words across lines. Doing it once here keeps the length
+        # filter, the title, and the marked text consistent with each
+        # other — flattening per-read would let them disagree and break
+        # the app/worker index parity selected_chapters relies on.
+        _flatten_inline(soup)
         # Filter and title use the unmarked text/soup: the app extracts
         # without marking, and inclusion/index/title parity between the two
         # reads is what keeps selected_chapters aligned (module docstring).
