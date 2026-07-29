@@ -35,6 +35,47 @@ _SEPARATOR_LINE = re.compile(
     r"^\s*(?:\*\s*){2,}\*?\s*$|^\s*[*–—\-]{3,}\s*$|^\s*⁂+\s*$"
 )
 
+# HTML block-level elements — the closed set from the HTML standard. Every
+# element NOT in here is treated as inline and flattened by
+# _flatten_inline(), so a tag we have never seen defaults to inline. That
+# is the safe direction: missing an inline tag re-splits sentences,
+# whereas treating a rare tag as inline merely joins adjacent text.
+#
+# Two deliberate additions to the standard block list:
+#   <br>  — the standard calls it inline, but it is a line break the
+#           author intended; flattening it would run verse together.
+#   document skeleton and table internals — unwrapping these would merge
+#           table cells or leak stylesheet text into the prose.
+_BLOCK_ELEMENTS: frozenset[str] = frozenset({
+    "address", "article", "aside", "blockquote", "canvas", "dd", "div",
+    "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+    "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main",
+    "nav", "noscript", "ol", "p", "pre", "section", "table", "tfoot",
+    "ul", "video",
+    "br", "html", "head", "body", "title", "script", "style", "meta",
+    "link", "tr", "td", "th", "thead", "tbody", "caption", "col",
+    "colgroup",
+})
+
+
+def _flatten_inline(soup) -> None:
+    """Replace inline elements with their text, in place.
+
+    get_text(separator="\\n") inserts its separator between adjacent
+    string nodes, so `<i>`/`<span>`/`<b>` inside a paragraph split the
+    sentence — and sometimes a word ("hyper<i>text</i>") — across lines.
+    Flattening them first keeps the sentence whole while leaving block
+    structure alone.
+
+    smooth() is required, not cosmetic: replace_with() leaves the new
+    string as its own node, so without the merge the separator is still
+    inserted and this function silently does nothing.
+    """
+    for tag in [t for t in soup.find_all(True)
+                if t.name not in _BLOCK_ELEMENTS]:
+        tag.replace_with(tag.get_text())
+    soup.smooth()
+
 
 @dataclass(frozen=True)
 class Chapter:

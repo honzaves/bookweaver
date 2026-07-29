@@ -256,3 +256,55 @@ class TestNavOnlyTitles:
 
         chapters = extract_chapters(str(path))
         assert [c.title for c in chapters] == ["Nav Name"]
+
+
+class TestFlattenInline:
+    """Inline markup must not split a sentence — or a word — into lines.
+
+    soup.get_text(separator="\\n") puts its separator between adjacent
+    string nodes, so <i>/<span>/<b> inside a paragraph used to shred the
+    text sent to the LLM. Block structure must survive untouched.
+    """
+
+    def call(self, html: str) -> str:
+        soup = BeautifulSoup(html, "html.parser")
+        epub_io._flatten_inline(soup)
+        return soup.get_text(separator="\n").strip()
+
+    def plain(self, html: str) -> str:
+        return BeautifulSoup(html, "html.parser").get_text(
+            separator="\n").strip()
+
+    def test_sentence_split_by_italic_is_rejoined(self):
+        html = "<p>I said, and signed <i>I want to throw my shit</i>.</p>"
+        assert self.plain(html) == "I said, and signed \nI want to throw my shit\n."
+        assert self.call(html) == "I said, and signed I want to throw my shit."
+
+    def test_word_split_by_markup_is_rejoined(self):
+        # Without soup.smooth() the replaced string stays a separate node
+        # and the newline survives — this test is what catches that.
+        assert self.call("<p>hyper<i>text</i> rules.</p>") == "hypertext rules."
+
+    def test_paragraphs_still_separate(self):
+        assert self.call("<p>One.</p><p>Two.</p>") == "One.\nTwo."
+
+    def test_br_still_breaks_the_line(self):
+        # <br> is "inline" per the HTML spec but is a break the author
+        # intended; flattening it would run poetry and addresses together.
+        assert self.call("<p>Line one<br/>Line two</p>") == "Line one\nLine two"
+
+    def test_scene_separator_inside_inline_tag_keeps_its_own_line(self):
+        assert self.call("<p>a</p><p><i>* * *</i></p><p>b</p>") == "a\n* * *\nb"
+
+    def test_nested_inline_tags_flatten_once(self):
+        assert self.call("<p>x <span>y <b>z</b></span> w</p>") == "x y z w"
+
+    def test_heading_split_by_markup_is_whole(self):
+        assert self.call("<h1>Conscious <i>Leadership</i> Now</h1>") == \
+            "Conscious Leadership Now"
+
+    def test_block_elements_include_br_and_skeleton(self):
+        for name in ("p", "div", "br", "hr", "li", "body", "script"):
+            assert name in epub_io._BLOCK_ELEMENTS
+        for name in ("i", "b", "span", "em", "a", "sup"):
+            assert name not in epub_io._BLOCK_ELEMENTS
