@@ -5,3 +5,21 @@
 
 - remove the old UI
 - book file name wrong
+
+- double chapter 1 in summary
+
+- reorganise code
+
+- epub_io.py:140 shreds sentences at inline markup  -> IN PROGRESS
+  spec: docs/superpowers/specs/2026-07-29-epub-inline-markup-design.md
+  flatten every element outside the HTML block-level set (keeping <br> and
+  the document skeleton) before get_text, so markup stops splitting
+  sentences and words. 34002 -> 16277 fragment lines library-wide.
+
+- epub_io: hard-wrapped source text (SEPARATE from the above, not scoped)
+  some books ship literal newlines mid-sentence in the source itself, not
+  from markup — The Skinner 9983 fragment lines, Designing Multi-Agent 814,
+  Multi-Agent Development 672. the inline fix above does nothing for these.
+  needs its own fix (collapse single newlines inside a paragraph) and its
+  own evidence — risky near scene separators and verse, and it changes text
+  in books that are currently fine.

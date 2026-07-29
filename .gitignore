@@ -213,3 +213,5 @@ books/
 
 # Hugging Face model cache (Kokoro TTS weights, downloaded on first run)
 .hf_cache/
+
+books/
