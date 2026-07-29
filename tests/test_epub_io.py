@@ -303,6 +303,16 @@ class TestFlattenInline:
         assert self.call("<h1>Conscious <i>Leadership</i> Now</h1>") == \
             "Conscious Leadership Now"
 
+    def test_break_inside_inline_tag_survives(self):
+        # replace_with(get_text()) destroyed the <br> and fused the words
+        # ("WHO ARE YOUAND WHAT IS..."), corrupting 49 documents across the
+        # library. unwrap() hoists children so nested breaks survive.
+        assert self.call("<p><i>one<br/>two</i></p>") == "one\ntwo"
+
+    def test_block_nested_in_inline_tag_survives(self):
+        assert self.call("<div><span><p>one</p><p>two</p></span></div>") == \
+            "one\ntwo"
+
     def test_block_elements_include_br_and_skeleton(self):
         for name in ("p", "div", "br", "hr", "li", "body", "script"):
             assert name in epub_io._BLOCK_ELEMENTS

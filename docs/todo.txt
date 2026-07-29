@@ -14,7 +14,7 @@
   spec: docs/superpowers/specs/2026-07-29-epub-inline-markup-design.md
   flatten every element outside the HTML block-level set (keeping <br> and
   the document skeleton) before get_text, so markup stops splitting
-  sentences and words. 34002 -> 16277 fragment lines library-wide.
+  sentences and words. 34002 -> 17913 fragment lines library-wide.
 
 - epub_io: hard-wrapped source text (SEPARATE from the above, not scoped)
   some books ship literal newlines mid-sentence in the source itself, not

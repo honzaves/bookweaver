@@ -35,8 +35,9 @@ _SEPARATOR_LINE = re.compile(
     r"^\s*(?:\*\s*){2,}\*?\s*$|^\s*[*–—\-]{3,}\s*$|^\s*⁂+\s*$"
 )
 
-# HTML block-level elements — the closed set from the HTML standard. Every
-# element NOT in here is treated as inline and flattened by
+# HTML block-level elements — the commonly cited block list plus our own
+# additions (not a normative set from the standard). Every element NOT in
+# here is treated as inline and flattened by
 # _flatten_inline(), so a tag we have never seen defaults to inline. That
 # is the safe direction: missing an inline tag re-splits sentences,
 # whereas treating a rare tag as inline merely joins adjacent text.
@@ -47,11 +48,12 @@ _SEPARATOR_LINE = re.compile(
 #   document skeleton and table internals — unwrapping these would merge
 #           table cells or leak stylesheet text into the prose.
 _BLOCK_ELEMENTS: frozenset[str] = frozenset({
-    "address", "article", "aside", "blockquote", "canvas", "dd", "div",
-    "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
-    "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main",
-    "nav", "noscript", "ol", "p", "pre", "section", "table", "tfoot",
-    "ul", "video",
+    "address", "article", "aside", "blockquote", "canvas", "center",
+    "dd", "details", "dialog", "div", "dl", "dt", "fieldset",
+    "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4",
+    "h5", "h6", "header", "hgroup", "hr", "li", "main", "nav",
+    "noscript", "ol", "p", "pre", "section", "table", "tfoot", "ul",
+    "video",
     "br", "html", "head", "body", "title", "script", "style", "meta",
     "link", "tr", "td", "th", "thead", "tbody", "caption", "col",
     "colgroup",
@@ -59,7 +61,7 @@ _BLOCK_ELEMENTS: frozenset[str] = frozenset({
 
 
 def _flatten_inline(soup) -> None:
-    """Replace inline elements with their text, in place.
+    """Unwrap inline elements, hoisting their children in place.
 
     get_text(separator="\\n") inserts its separator between adjacent
     string nodes, so `<i>`/`<span>`/`<b>` inside a paragraph split the
@@ -67,13 +69,17 @@ def _flatten_inline(soup) -> None:
     Flattening them first keeps the sentence whole while leaving block
     structure alone.
 
-    smooth() is required, not cosmetic: replace_with() leaves the new
-    string as its own node, so without the merge the separator is still
-    inserted and this function silently does nothing.
+    unwrap() (not replace_with(get_text())) so that a `<br>`/`<hr>`/block
+    element nested inside an inline tag survives — get_text() would
+    concatenate across it and fuse the words on either side.
+
+    smooth() is required, not cosmetic: unwrap() leaves the hoisted
+    strings as separate nodes, so without the merge the separator is
+    still inserted and this function silently does nothing.
     """
     for tag in [t for t in soup.find_all(True)
                 if t.name not in _BLOCK_ELEMENTS]:
-        tag.replace_with(tag.get_text())
+        tag.unwrap()
     soup.smooth()
 
 
@@ -179,10 +185,12 @@ def extract_chapters(path: str, preview_chars: int = 50,
         # other — flattening per-read would let them disagree and break
         # the app/worker index parity selected_chapters relies on.
         _flatten_inline(soup)
-        # Filter and title use the unmarked text/soup: the app extracts
-        # without marking, and inclusion/index/title parity between the two
-        # reads is what keeps selected_chapters aligned (module docstring).
-        # Mutating the soup first would also let the sentinel leak into a
+        # Filter and title use text/soup without the scene-break sentinel
+        # ("unmarked"): the app extracts without marking, and inclusion/
+        # index/title parity between the two reads is what keeps
+        # selected_chapters aligned (module docstring). Flattening above
+        # has already run identically for both reads; inserting the
+        # sentinel first, by contrast, would let it leak into a
         # preview-fallback title.
         text = soup.get_text(separator="\n").strip()
         if len(text) > MIN_CHAPTER_CHARS:

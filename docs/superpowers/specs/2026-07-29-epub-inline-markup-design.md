@@ -78,16 +78,17 @@ table tfoot ul video` — plus two deliberate additions:
 
 ```python
 def _flatten_inline(soup) -> None:
-    """Replace inline elements with their text, so a sentence split by
-    markup arrives whole.
+    """Unwrap inline elements, so a sentence split by markup arrives
+    whole. unwrap() (not replace_with(get_text())) so a <br>/<hr>/block
+    element nested inside an inline tag survives.
 
     get_text(separator="\n") puts its separator between adjacent string
-    nodes, and replace_with leaves the new string as a separate node —
+    nodes, and unwrap leaves the hoisted strings as separate nodes —
     so smooth() must merge them or the newline survives anyway.
     """
     for tag in [t for t in soup.find_all(True)
                 if t.name not in _BLOCK_ELEMENTS]:
-        tag.replace_with(tag.get_text())
+        tag.unwrap()
     soup.smooth()
 ```
 
@@ -115,7 +116,7 @@ Across all 23 books:
 
 | | today | after |
 |---|---|---|
-| Fragment lines | 34,002 | 16,277 |
+| Fragment lines | 34,002 | 17,913 |
 | Chapters passing `MIN_CHAPTER_CHARS` | 559 | 558 |
 | Word count (e.g. A World Without Email) | 91,319 | 89,238 |
 
