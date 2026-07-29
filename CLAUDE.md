@@ -32,7 +32,7 @@ boundaries, processed independently, and rejoined.
 |---|---|---|
 | `main.py` | Entry point only | Rarely |
 | `app.py` | Main window, UI wiring, slot logic | For new UI elements |
-| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); opt-in `mark_scene_breaks` scene-break sentinel; shared by app & worker | For chapter extraction/title logic |
+| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); inline markup flattened so sentences are not split across lines; opt-in `mark_scene_breaks` scene-break sentinel; shared by app & worker | For chapter extraction/title logic |
 | `worker.py` | Background thread, pipeline, file output (no longer extracts chapters inline — delegates to `epub_io`) | For pipeline changes |
 | `prompts.py` | All LLM prompt strings, incl. `build_context_block` (continuity) | For prompt tuning |
 | `llm.py` | LLM backends — in-process mlx-lm/mlx-vlm (default) and local Ollama; lazy optional imports, Qt-free | For backend/LLM-call changes |

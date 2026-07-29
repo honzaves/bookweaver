@@ -104,7 +104,7 @@ bookweaver/
 ├── worker.py             ProcessingWorker (QThread) — pipeline logic
 ├── epub_io.py            EPUB → ordered Chapter list (titles from the book's
 │                         TOC — NCX and/or EPUB3 nav — then headings, then a
-│                         text preview; scene breaks)
+│                         text preview; inline markup flattened; scene breaks)
 ├── prompts.py            LLM prompt builders
 ├── widgets.py            Reusable custom Qt widgets
 ├── settings.py           Config loader — reads bookweaver.json, builds stylesheet

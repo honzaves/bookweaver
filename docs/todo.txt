@@ -10,7 +10,7 @@
 
 - reorganise code
 
-- epub_io.py:140 shreds sentences at inline markup  -> IN PROGRESS
+- epub_io.py shreds sentences at inline markup  -> DONE
   spec: docs/superpowers/specs/2026-07-29-epub-inline-markup-design.md
   flatten every element outside the HTML block-level set (keeping <br> and
   the document skeleton) before get_text, so markup stops splitting
