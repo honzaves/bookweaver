@@ -97,12 +97,6 @@ class TestTargetLang:
 #  voices_for_language (config-driven)
 # ──────────────────────────────────────────────────────────────
 MINIMAL_CFG = {
-    "colors": {
-        "bg": "#000000", "surface": "#111111", "surface2": "#222222",
-        "border": "#333333", "amber": "#ffaa00", "amber_dim": "#885500",
-        "text": "#ffffff", "muted": "#888888", "success": "#00ff00",
-        "warning": "#ffff00", "error": "#ff0000", "sweet": "#00ff00",
-    },
     "models": [{"label": "Test", "value": "test:1b"}],
     "default_model": "test:1b",
 }

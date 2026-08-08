@@ -4,6 +4,12 @@ Design for adding Kokoro-powered MP3 audiobook generation to BookWeaver.
 The feature is **strictly additive**: when its checkbox is off, the existing
 pipeline runs unchanged.
 
+> **Historical document.** The backend sections (`tts.py`, `worker.py`,
+> `bookweaver.json`) still describe the shipped code. The UI sections
+> (§6, and Phase 4 in the appendix) describe the original `app.py` /
+> `widgets.py` frontend, which has since been removed — the equivalent
+> controls now live in `wizard_steps.py` and `wizard_logic.build_config()`.
+
 ---
 
 ## 1. Goals & non-goals
@@ -220,7 +226,7 @@ def voices_for_language(lang_code: str) -> list[dict]:
     return SETTINGS.get("voices", {}).get(lang_code, [])
 ```
 
-Mode → language code mapping (computed in `app.py`):
+Mode → language code mapping (`TARGET_LANG`, now in `settings.py`):
 
 ```python
 TARGET_LANG = {
@@ -232,7 +238,7 @@ TARGET_LANG = {
 
 ---
 
-## 6. UI design (`app.py`, `widgets.py`)
+## 6. UI design (historical — the original `app.py` / `widgets.py` frontend)
 
 ### 6.1 New controls in `_add_options_group`
 

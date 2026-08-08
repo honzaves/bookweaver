@@ -33,7 +33,7 @@ top.
 | Model selection | Dropdown loaded from `bookweaver.json` — no code changes to add models |
 | CEFR levels | B1 · B2 · C1 · C2 |
 | Processing mode | **Summarise → Rewrite**, **Full translation**, **Summarise only** (English, no translation), or **Summary with key ideas** |
-| Chapter selection | Scrollable checklist of every chapter with a tri-state "Select all"; process any subset (≥1 required). The wizard frontend additionally supports reordering chapters (drag-and-drop or ▲▼) — processing, all output formats, and the MP3 follow the custom order |
+| Chapter selection | Scrollable checklist of every chapter with a tri-state "Select all"; process any subset (≥1 required). Chapters can also be reordered (drag-and-drop or ▲▼) — processing, all output formats, and the MP3 follow the custom order |
 | Condensation slider | Keep 10–90 % of each chapter; visible in every mode except Full translation |
 | Creativity slider | 1–10 scale controlling LLM elaboration freedom and Ollama temperature |
 | Chapter chunking | Long chapters are split at paragraph boundaries into configurable-size chunks, processed independently, then rejoined |
@@ -90,7 +90,7 @@ disabled; everything else works as normal.
 ## Running
 
 ```bash
-python main.py
+python wizard.py
 ```
 
 ---
@@ -99,29 +99,34 @@ python main.py
 
 ```
 bookweaver/
-├── main.py               Entry point — creates QApplication and main window
-├── app.py                BookWeaverApp (QMainWindow) — all UI wiring
+├── wizard.py             Entry point — QApplication + WizardWindow shell/nav
+├── wizard_steps.py       One QWidget per wizard step (Book, Transform, Output, Run)
+├── wizard_widgets.py     Custom-painted widgets (sliders, mode tiles, rail,
+│                         console, reorderable chapter list)
+├── wizard_theme.py       Wizard palette, stylesheet, Caveat font
+├── wizard_logic.py       Pure, Qt-free wizard state + the build_config() contract
 ├── worker.py             ProcessingWorker (QThread) — pipeline logic
 ├── epub_io.py            EPUB → ordered Chapter list (titles from the book's
 │                         TOC — NCX and/or EPUB3 nav — then headings, then a
 │                         text preview; inline markup flattened; scene breaks)
 ├── prompts.py            LLM prompt builders
-├── widgets.py            Reusable custom Qt widgets
-├── settings.py           Config loader — reads bookweaver.json, builds stylesheet
+├── llm.py                LLM backends — in-process mlx-lm/mlx-vlm, or Ollama
+├── settings.py           Config loader — reads bookweaver.json
 ├── tts.py                Kokoro TTS → MP3 audiobook (optional deps, import-gated)
-├── level_detector.py     Standalone CEFR level assessment (profiler + LLM judge)
 ├── bookweaver.json       All user-editable settings: colours, models, timeout, voices
 ├── pyproject.toml        Project metadata and tool config
 ├── requirements.txt      Runtime dependencies
 ├── requirements-dev.txt  Dev/test dependencies
 ├── requirements-tts.txt  Optional Kokoro TTS dependencies
 └── tests/
-    ├── conftest.py       PyQt6 (and optional-TTS) stubs so tests run without Qt
+    ├── conftest.py       PyQt6 (and optional-dep) stubs so tests run without Qt
     ├── test_epub_io.py
-    ├── test_level_detector.py
+    ├── test_llm.py
     ├── test_prompts.py
     ├── test_settings.py
     ├── test_tts.py
+    ├── test_wizard_logic.py
+    ├── test_wizard_theme.py
     └── test_worker.py
 ```
 
@@ -144,7 +149,9 @@ Everything user-editable lives in `bookweaver.json`. No Python changes needed.
 
 ### Changing colours
 
-Edit the `"colors"` block. All values are standard `#RRGGBB` hex.
+Edit the `"wizard_colors"` block. All values are standard `#RRGGBB` hex, and
+every key must be present — the wizard refuses to start on an incomplete
+palette rather than falling back to defaults.
 
 ### Changing the default timeout
 

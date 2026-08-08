@@ -2,15 +2,15 @@
 """
 wizard.py
 ---------
-Entry point for the BookWeaver Guided Wizard frontend.
+Entry point for the BookWeaver Guided Wizard — the app's only frontend.
 
     python wizard.py
 
-Runs alongside the classic UI (`python main.py`), which is untouched. Both
-drive the same ProcessingWorker.
+Drives ProcessingWorker, which is UI-agnostic and shared with nothing else
+since the original main.py/app.py frontend was removed.
 
 Must not import tts (torch) or llm (mlx) at startup — availability is probed
-with importlib.util.find_spec, exactly as app.py does.
+with importlib.util.find_spec, which keeps launch fast.
 """
 
 import sys

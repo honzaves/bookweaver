@@ -80,11 +80,11 @@ class TestPalette:
         assert wizard_theme.W_AMBER == "#d4a853"
         assert wizard_theme.W_CONSOLE_BG == "#0c0c09"
 
-    def test_old_colors_block_is_untouched(self):
-        assert set(CONFIG["colors"]) == {
-            "bg", "surface", "surface2", "border", "amber", "amber_dim",
-            "text", "muted", "success", "warning", "error", "sweet",
-        }
+    def test_old_colors_block_is_gone(self):
+        """The pre-wizard `colors` block died with the app.py/widgets.py
+        frontend that read it. wizard_colors is now the only palette; a
+        reintroduced `colors` block would be a second source of truth."""
+        assert "colors" not in CONFIG
 
 
 class TestRamp:
@@ -116,7 +116,7 @@ class TestLogColors:
 class TestMissingBlock:
     def test_missing_wizard_colors_raises_systemexit(self, tmp_path):
         bad = tmp_path / "bookweaver.json"
-        bad.write_text(json.dumps({"colors": {}}))
+        bad.write_text(json.dumps({"models": [], "default_model": ""}))
         with pytest.raises(SystemExit):
             wizard_theme._load_wizard_colors(bad)
 
@@ -133,7 +133,7 @@ class TestStylesheet:
         ss = wizard_theme.WIZARD_STYLESHEET
         assert wizard_theme.W_WINDOW_BG in ss     # #111210
         assert wizard_theme.W_FOOTER_BG in ss     # #16160f
-        assert "#1c1d1b" not in ss                # old colors.surface
+        assert "#1c1d1b" not in ss                # the removed frontend's surface
 
     def test_defines_the_object_names_the_steps_rely_on(self):
         ss = wizard_theme.WIZARD_STYLESHEET

@@ -4,9 +4,14 @@
 **Goal:** offer a choice of TTS engine — Kokoro (existing) or **Chatterbox (new, default)** —
 and produce an audiobook from text using Chatterbox voice cloning.
 
-Read `CLAUDE.md` first. Its **Architecture rules** (§51) are binding: `tts.py` must stay
+Read `CLAUDE.md` first. Its **Architecture rules** are binding: `tts.py` must stay
 Qt-free and import optional TTS deps only, behind availability gates; `worker.py` imports
-`tts` lazily inside `_generate_mp3` only; `app.py` must never import `tts`.
+`tts` lazily inside `_generate_mp3` only; the wizard must never import `tts`.
+
+> **Note (2026-08-08).** This plan predates the removal of the original
+> `main.py` / `app.py` / `widgets.py` frontend. `wizard.py` is now the only UI,
+> and the plan's steps have been rewritten against it. CLAUDE.md cross-references
+> are given by section name — they used to be line numbers, which have all shifted.
 
 ---
 
@@ -290,7 +295,7 @@ milliseconds rather than after a long load.
 ## 4. `bookweaver.json` — config
 
 Extend the `tts` block and add a `reference_voices` block mirroring the existing `voices`
-pattern (CLAUDE.md §92: all user-editable values live here):
+pattern (CLAUDE.md *Configuration system*: all user-editable values live here):
 
 ```json
 "tts": {
@@ -329,7 +334,7 @@ untouched so Browse-selected files work.
 
 ## 5. `settings.py`
 
-Add, mirroring `voices_for_language()` (`settings.py:295`):
+Add, mirroring `voices_for_language()`:
 
 ```python
 def reference_voices_for_language(lang_code: str) -> list[dict]:
@@ -344,7 +349,7 @@ imports nothing but stdlib — keep it that way.
 
 ## 6. Wizard UI — engine selector + reference clip field
 
-Follow CLAUDE.md §390 *Adding a new UI control*.
+Follow CLAUDE.md *Adding a new UI control*.
 
 In `wizard_steps.py`, the format card already builds a Voice row at **lines 454–461** and
 reveals it via `_Reveal` at **555**, repopulating through `repopulate_voices()` at **590**.
@@ -372,24 +377,34 @@ Mirror that structure exactly:
    `repopulate_voices()`, and call it from the same place the language change is handled
    (see the comment at line 321, "Changing this re-populates the MP3 voice list in step 3").
 
-Colours must come from `bookweaver.json` via `settings.py` (CLAUDE.md rule 2) — do not
-hardcode hex.
+Colours must come from `bookweaver.json`'s `wizard_colors` block via the `W_*` constants
+in `wizard_theme.py` (CLAUDE.md rule 2) — do not hardcode hex, and do not reach for
+`settings.py`, which is theme-free.
 
 ---
 
 ## 7. Config plumbing
 
-Per CLAUDE.md §390, thread the two new values through:
+Per CLAUDE.md *Adding a new UI control*, thread the two new values through:
 
-1. `_build_config()` (in `app.py`, and check `wizard_logic.py` for the wizard's own
-   builder) → add `"tts_engine"` and `"reference_clip"`.
-2. Resume block in `_on_resume()` → include both, so a resumed run keeps the engine.
-3. `worker.py` → extract in `_generate_mp3` (below).
+1. `WizardState` in `wizard_logic.py` → add `tts_engine` and `reference_clip` fields
+   with defaults.
+2. `build_config()` in the same module → emit `"tts_engine"` and `"reference_clip"`,
+   and add both keys to `CONFIG_KEYS`. That frozenset is the worker contract, and
+   `test_wizard_logic.py` asserts it matches what `build_config()` returns — including
+   an exact key count, which must be bumped from 23 to 25.
+3. `StepOutput.load_from()` / `.apply_to()` in `wizard_steps.py` → round-trip both, or
+   the values won't survive step navigation.
+4. `worker.py` → extract in `_generate_mp3` (below).
 
-**`app.py` availability check.** It currently probes Kokoro cheaply via
-`importlib.util.find_spec("kokoro")` to avoid importing torch at startup (CLAUDE.md rule
-1). Add the equivalent for Chatterbox — `find_spec("mlx_audio")` — and gate the engine
-options on what is actually installed. `app.py` must still never import `tts`.
+Resume needs no work: `wizard._on_resume` spreads `**config`, so anything
+`build_config()` emits is re-applied automatically.
+
+**Availability check.** `wizard_steps.py` probes Kokoro cheaply at module scope via
+`_KOKORO_AVAILABLE = importlib.util.find_spec("kokoro") is not None`, avoiding a torch
+import at startup (CLAUDE.md rule 1). Add the equivalent for Chatterbox —
+`find_spec("mlx_audio")` — and gate the engine options on what is actually installed.
+The wizard must still never import `tts`.
 
 ---
 
@@ -456,7 +471,7 @@ This also isolates a 2.7 GB model from the GUI process.
 
 `tests/conftest.py` already stubs Qt and the optional TTS packages. Add an `mlx_audio`
 stub there the same way, so `tts.py` imports cleanly without MLX installed. Never stub
-`numpy` (existing note in CLAUDE.md §366).
+`numpy` (existing note in CLAUDE.md *Test suite*).
 
 Add to `tests/test_tts.py` — all pure, no model:
 
@@ -474,7 +489,7 @@ Add to `tests/test_tts.py` — all pure, no model:
 
 Run `pytest -q`. One pre-existing failure in
 `test_settings.py::TestOllamaTimeout::test_defaults_when_missing` is known and unrelated
-(CLAUDE.md §384) — do not "fix" it as part of this work.
+(CLAUDE.md *Test suite*) — do not "fix" it as part of this work.
 
 ---
 
@@ -486,8 +501,8 @@ Run `pytest -q`. One pre-existing failure in
    no music; accent of the clip decides the accent of the output; WAV/MP3/FLAC only).
    Note that the first ever run also pulls `S3TokenizerV2`.
 2. **`CLAUDE.md`** — update the file map, add `mlx_audio` to the allowed `tts` imports in
-   the import-flow rules (§53), and document the `engine` / `reference_voices` config keys
-   in §92 and §127.
+   the import-flow rules (*Architecture rules* 1), and document the `engine` /
+   `reference_voices` config keys under *Configuration system*.
 3. **`README.md`** — mention the engine choice and that Chatterbox is the default.
 
 ---

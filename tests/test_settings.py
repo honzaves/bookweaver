@@ -11,9 +11,7 @@ import pytest
 
 import settings as settings_module
 from settings import (
-    C_AMBER, C_AMBER_DIM, C_BG, C_BORDER, C_ERROR, C_MUTED,
-    C_SUCCESS, C_SURFACE, C_SURFACE2, C_TEXT, C_WARNING,
-    SETTINGS, STYLESHEET, OLLAMA_TIMEOUT, creativity_to_temperature,
+    SETTINGS, OLLAMA_TIMEOUT, creativity_to_temperature,
     _load_config, _build,
 )
 
@@ -51,12 +49,6 @@ def _write_json(path: Path, data: dict) -> Path:
     return p
 
 MINIMAL_CFG = {
-    "colors": {
-        "bg": "#000000", "surface": "#111111", "surface2": "#222222",
-        "border": "#333333", "amber": "#ffaa00", "amber_dim": "#885500",
-        "text": "#ffffff", "muted": "#888888", "success": "#00ff00",
-        "warning": "#ffff00", "error": "#ff0000", "sweet": "#00ff00",
-    },
     "models": [{"label": "Test", "value": "test:1b"}],
     "default_model": "test:1b",
 }
@@ -66,11 +58,6 @@ class TestLoadConfig:
         p = _write_json(tmp_path, MINIMAL_CFG)
         result = _load_config(p)
         assert isinstance(result, dict)
-
-    def test_loads_colors(self, tmp_path):
-        p = _write_json(tmp_path, MINIMAL_CFG)
-        result = _load_config(p)
-        assert result["colors"]["bg"] == "#000000"
 
     def test_loads_models(self, tmp_path):
         p = _write_json(tmp_path, MINIMAL_CFG)
@@ -92,63 +79,28 @@ class TestLoadConfig:
 #  _build — module constant population
 # ──────────────────────────────────────────────────────────────
 class TestBuild:
-    def test_colour_constants_set_from_json(self, tmp_path):
-        p = _write_json(tmp_path, MINIMAL_CFG)
-        _build(p)
-        assert settings_module.C_BG == "#000000"
-        assert settings_module.C_AMBER == "#ffaa00"
-
     def test_settings_dict_populated(self, tmp_path):
         p = _write_json(tmp_path, MINIMAL_CFG)
         _build(p)
         assert settings_module.SETTINGS["default_model"] == "test:1b"
         assert settings_module.SETTINGS["models"] == MINIMAL_CFG["models"]
+        _build()  # restore
 
-    def test_stylesheet_contains_loaded_colours(self, tmp_path):
+    def test_no_colours_required_in_config(self, tmp_path):
+        """settings.py is theme-free: the palette lives in wizard_colors,
+        read by wizard_theme.py. A config with no colour block must build."""
+        assert "colors" not in MINIMAL_CFG
         p = _write_json(tmp_path, MINIMAL_CFG)
-        _build(p)
-        assert "#000000" in settings_module.STYLESHEET
-        assert "#ffaa00" in settings_module.STYLESHEET
+        _build(p)  # must not raise
+        _build()  # restore
 
     def test_restores_defaults_after_test(self, tmp_path):
         """Rebuild from the real config so other tests aren't affected."""
+        real = _load_config()
         p = _write_json(tmp_path, MINIMAL_CFG)
         _build(p)
         _build()  # restore
-        assert settings_module.C_BG == "#111210"
-
-
-# ──────────────────────────────────────────────────────────────
-#  Colour constants (loaded from real bookweaver.json)
-# ──────────────────────────────────────────────────────────────
-class TestColourConstants:
-    COLOURS = {
-        "C_BG": C_BG, "C_SURFACE": C_SURFACE, "C_SURFACE2": C_SURFACE2,
-        "C_BORDER": C_BORDER, "C_AMBER": C_AMBER, "C_AMBER_DIM": C_AMBER_DIM,
-        "C_TEXT": C_TEXT, "C_MUTED": C_MUTED, "C_SUCCESS": C_SUCCESS,
-        "C_WARNING": C_WARNING, "C_ERROR": C_ERROR,
-    }
-
-    def test_all_are_hex_strings(self):
-        for name, value in self.COLOURS.items():
-            assert isinstance(value, str) and value.startswith("#"), name
-
-    def test_all_valid_hex_length(self):
-        for name, value in self.COLOURS.items():
-            assert len(value) in {4, 7, 9}, f"{name}: {value}"
-
-    def test_all_valid_hex_digits(self):
-        for name, value in self.COLOURS.items():
-            assert all(c in "0123456789abcdefABCDEF" for c in value[1:]), name
-
-    # Colours that must appear in the stylesheet (widget-only colours excluded).
-    STYLESHEET_COLOURS = {"C_BG", "C_SURFACE", "C_SURFACE2", "C_BORDER",
-                          "C_AMBER", "C_AMBER_DIM", "C_TEXT", "C_MUTED", "C_ERROR"}
-
-    def test_stylesheet_references_each_colour(self):
-        for name in self.STYLESHEET_COLOURS:
-            value = self.COLOURS[name]
-            assert value in STYLESHEET, f"{name} ({value}) not found in STYLESHEET"
+        assert settings_module.OLLAMA_TIMEOUT == real["ollama_timeout"]
 
 
 # ──────────────────────────────────────────────────────────────

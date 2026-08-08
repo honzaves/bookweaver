@@ -7,21 +7,6 @@
 
   "chapter_title_preview_chars": 50,
 
-  "colors": {
-    "bg":        "#111210",
-    "surface":   "#1c1d1b",
-    "surface2":  "#252620",
-    "border":    "#2e2f2a",
-    "amber":     "#d4a853",
-    "amber_dim": "#8a6a2e",
-    "text":      "#e8e4d9",
-    "muted":     "#7a7870",
-    "success":   "#7aab6e",
-    "warning":   "#c98d3a",
-    "error":     "#c0604a",
-    "sweet":     "#7aab6e"
-  },
-
   "wizard_colors": {
     "app_bg":            "#0a0a08",
     "window_bg":         "#111210",

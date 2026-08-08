@@ -4,9 +4,9 @@
 
 ## What this project does
 
-BookWeaver is a PyQt6 desktop app.
-It reads an English EPUB and produces output via Ollama, using one of four
-processing modes:
+BookWeaver is a PyQt6 desktop app, launched with `python wizard.py`.
+It reads an English EPUB and produces output via a local LLM, using one of
+four processing modes:
 
 - **Summarise → Rewrite** — condenses each chapter to a target length (via
   `build_summary_prompt`), then rewrites it in Spanish (via `build_rewrite_prompt`).
@@ -30,19 +30,16 @@ boundaries, processed independently, and rejoined.
 
 | File | Purpose | What to touch |
 |---|---|---|
-| `main.py` | Entry point only | Rarely |
-| `app.py` | Main window, UI wiring, slot logic | For new UI elements |
-| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); inline markup flattened so sentences are not split across lines; the chapter's own display heading stripped from the body; opt-in `mark_scene_breaks` scene-break sentinel; shared by app & worker | For chapter extraction/title logic |
+| `wizard.py` | **The frontend** — entry point + window shell/nav (`python wizard.py`). The sole UI | For shell/nav changes |
+| `wizard_steps.py` | One QWidget per wizard step (`StepBook`, `StepTransform`, `StepOutput`, `StepRun`) | For step content changes |
+| `wizard_widgets.py` | Custom-painted widgets (sliders, mode tiles, rail, console, reorderable chapter list) | For new/changed widgets |
+| `wizard_logic.py` | Pure, Qt-free wizard state + the 23-key `build_config` worker contract | For wizard behaviour changes |
+| `wizard_theme.py` | Palette (`wizard_colors` in JSON), stylesheet, Caveat font | For styling |
+| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); inline markup flattened so sentences are not split across lines; the chapter's own display heading stripped from the body; opt-in `mark_scene_breaks` scene-break sentinel; shared by wizard & worker | For chapter extraction/title logic |
 | `worker.py` | Background thread, pipeline, file output (no longer extracts chapters inline — delegates to `epub_io`) | For pipeline changes |
 | `prompts.py` | All LLM prompt strings, incl. `build_context_block` (continuity) | For prompt tuning |
 | `llm.py` | LLM backends — in-process mlx-lm/mlx-vlm (default) and local Ollama; lazy optional imports, Qt-free | For backend/LLM-call changes |
-| `widgets.py` | All reusable Qt widgets | For new/changed widgets |
-| `wizard.py` | **New wizard frontend** entry point + shell (`python wizard.py`). Coexists with `main.py`/`app.py` | For wizard shell/nav changes |
-| `wizard_theme.py` | Wizard palette (`wizard_colors` in JSON), stylesheet, Caveat font | For wizard styling |
-| `wizard_logic.py` | Pure, Qt-free wizard state + the 23-key `build_config` worker contract | For wizard behaviour changes |
-| `wizard_widgets.py` | Wizard's custom-painted widgets (sliders, tiles, rail, console, reorderable chapter list) | For new/changed wizard widgets |
-| `wizard_steps.py` | One QWidget per wizard step | For step content changes |
-| `settings.py` | Config loader — reads JSON, builds stylesheet | For loader logic changes |
+| `settings.py` | Config loader — reads JSON | For loader logic changes |
 | `tts.py` | Kokoro TTS → MP3 audiobook with ID3 chapters; optional deps behind an import gate | For TTS/audio changes |
 | `bookweaver.json` | All user-editable settings: colours, models, timeout, TTS voices | User edits; no code changes |
 
@@ -51,30 +48,38 @@ boundaries, processed independently, and rejoined.
 ## Architecture rules
 
 1. **Imports flow one way:**
-   `main` → `app` → `worker`, `widgets`, `settings`
-   `app` → `epub_io` (lazy, in `_on_epub_selected`)
+   `wizard` → `wizard_steps`, `wizard_widgets`, `wizard_theme`,
+   `wizard_logic`, `settings`
+   `wizard` → `worker` (lazy, inside `_start` — never at import time)
+   `wizard_steps` → `wizard_logic`, `wizard_widgets`, `settings`
+   `wizard_steps` → `epub_io` (lazy, inside the EPUB-selected handler)
+   `wizard_widgets` → `wizard_logic`, `wizard_theme` (only — the chapter
+   list stays decoupled from `epub_io`; it is handed plain `ChapterRow`s)
+   `wizard_logic` → `settings` only; never Qt
+   `wizard_theme` → stdlib only (reads `wizard_colors` from the JSON itself)
    `worker` → `prompts`, `settings`, `tts` (lazy, inside `_generate_mp3` only)
    `worker` → `epub_io` (lazy, inside `run`)
    `worker` → `llm` (lazy, inside `run` / `_llm_call`)
    `llm` → `httpx` and optional mlx deps only (`mlx_lm`, `mlx_vlm`,
    `mlx.core`), all imported lazily inside functions/constructors; never
-   Qt, never `app`/`worker`/`settings`
-   `widgets` → `settings` (only — `ChapterListWidget` stays decoupled from
-   `epub_io`; the app passes it plain `(index, label)` pairs)
-   `epub_io` → `ebooklib`/`bs4` only; never Qt, `app`, `worker`, or `settings`
+   Qt, never `wizard*`/`worker`/`settings`
+   `epub_io` → `ebooklib`/`bs4` only; never Qt, `wizard*`, `worker`, or `settings`
    `prompts` → nothing
    `tts` → optional TTS deps only (`kokoro`, `numpy`, `soundfile`, `lameenc`,
    `mutagen`), all behind the `TTS_AVAILABLE` import gate; never Qt, never
-   `app`/`worker`
+   `wizard*`/`worker`
    `settings` → nothing (stdlib only)
-   Never import `app` or `worker` from `widgets` or `settings`.
-   `app.py` must not import `tts` — it checks Kokoro availability cheaply
-   via `importlib.util.find_spec("kokoro")` to avoid loading torch at startup.
-   `app.py` must not import `llm` either — it checks mlx availability cheaply
-   via `importlib.util.find_spec("mlx_lm")`.
+   Never import a `wizard*` module or `worker` from `settings`, `epub_io`,
+   `prompts`, `llm`, or `tts`.
+   The wizard must not import `tts` (torch) or `llm` (mlx) at startup —
+   availability is probed with `importlib.util.find_spec("kokoro")` /
+   `find_spec("mlx_lm")`, which keeps launch fast.
 
-2. **All colours come from `bookweaver.json` via `settings.py`.**
-   Never hardcode hex values anywhere else.
+2. **All colours come from `bookweaver.json`'s `wizard_colors` block**, read
+   by `wizard_theme.py` and exposed as `W_*` constants + `WIZARD_STYLESHEET`.
+   Never hardcode hex values anywhere else. `settings.py` is theme-free and
+   must stay that way — it owns models and timeouts, `wizard_theme.py` owns
+   colour, and neither imports the other.
 
 3. **`SETTINGS` and `OLLAMA_TIMEOUT` are module-level globals in `settings.py`**,
    populated by `_build()` at import time.
@@ -85,7 +90,7 @@ boundaries, processed independently, and rejoined.
 5. **`prompts.py` has no Qt dependency at all.**
 
 6. **`creativity_to_temperature()` lives in `settings.py`** — single source
-   of truth used by both `worker.py` and `widgets.py`.
+   of truth used by both `worker.py` and `wizard_logic.py`.
 
 ---
 
@@ -93,7 +98,10 @@ boundaries, processed independently, and rejoined.
 
 All user-editable values live in `bookweaver.json`:
 
-- `colors` — hex values for the full colour palette
+- `wizard_colors` — hex values for the full UI palette. Read by
+  `wizard_theme.py`, **not** by `settings.py`; every key becomes a
+  `W_<UPPERCASE>` constant, and a missing block is a startup error rather
+  than a silent default
 - `ollama_timeout` — default timeout in seconds (overridable per-run in the UI)
 - `chapter_title_preview_chars` — fallback title length (default 50): when a
   chapter has no TOC title or heading, its title is the first N characters of
@@ -116,9 +124,9 @@ All user-editable values live in `bookweaver.json`:
   are Ollama tags. The legacy flat-list schema still parses (implies
   `llm_backend: "ollama"`).
 
-`settings.py` loads this at import time via `_build()`, which populates all
-`C_*` colour constants, builds `STYLESHEET`, populates `SETTINGS`, and sets
-`OLLAMA_TIMEOUT`.
+`settings.py` loads this at import time via `_build()`, which populates
+`SETTINGS` and sets `OLLAMA_TIMEOUT`. `wizard_theme.py` loads
+`wizard_colors` at import time through its own separate loader.
 
 ---
 
@@ -133,7 +141,7 @@ All user-editable values live in `bookweaver.json`:
 | `chunk_size` | `int` | Max words per chunk (default 2 000) |
 | `keep_pct` | `int` | Condensation % — used in `summarise_rewrite` and `summarise_only` modes |
 | `out_format` | `list[str]` | One or more of `"txt"`, `"epub"`, `"html"` — all selected formats are written |
-| `selected_chapters` | `list[int]` | Indices (into the extracted chapter list) the user ticked, **in processing order** — the wizard lets the user reorder rows and the worker processes in list order (`epub_io.select_chapters` honours it). `app.py` sends sorted indices (book order). `None`/absent means all |
+| `selected_chapters` | `list[int]` | Indices (into the extracted chapter list) the user ticked, **in processing order** — the wizard lets the user reorder rows and the worker processes in list order (`epub_io.select_chapters` honours it). `None`/absent means all |
 | `creativity` | `int` | 1–10 scale; controls temperature and prose directives |
 | `level` | `str` | CEFR level: `"B1"`, `"B2"`, `"C1"`, or `"C2"` |
 | `generate_mp3` | `bool` | Synthesise an MP3 audiobook after the text output (requires `"txt"` in `out_format` and the optional Kokoro install — see `kokoro.md`) |
@@ -377,13 +385,13 @@ The log shows `Chapter 3.1/4`, `3.2/4` etc. when chunking is active.
 - `completed_results` — list of `(title, text)` tuples updated after each chapter (text is Spanish or English depending on mode)
 - `failed_at_chapter` — index of the chapter that failed
 
-On `finished(False)`, if `completed_results` is non-empty, `BookWeaverApp`
+On `finished(False)`, if `completed_results` is non-empty, `WizardWindow`
 stores a `_resume_state` dict and shows a **Resume** button. Pressing it
 creates a new worker with `resume_from`, `prior_results`, `timeout`, and
 `chunk_size` injected into the config dict. The chapter loop skips
 already-done chapters and seeds `results` with the prior work.
 
-`_on_resume` rebuilds the config by spreading the original (`**config`), so
+`wizard._on_resume` rebuilds the config by spreading the original (`**config`), so
 `selected_chapters` rides along automatically — a resumed run reprocesses the
 same chapter subset, and `resume_from` indexes into that already-filtered list.
 
@@ -412,9 +420,8 @@ limit the loss to the in-flight chapter.
 
 **`max_tokens` is now a per-run config key:** `ProcessingWorker` honours
 `config["max_tokens"]`, falling back to `SETTINGS["mlx_max_tokens"]` from
-`bookweaver.json`. The wizard frontend exposes it as a spinbox in Step 3
-(mlx backend only), while the original `app.py` never sets it and keeps the
-JSON default.
+`bookweaver.json`. The wizard exposes it as a spinbox in Step 3 (mlx
+backend only).
 
 ---
 
@@ -426,23 +433,17 @@ declaration lines to be silently dropped.
 **After any edit that touches a class boundary, verify with:**
 
 ```bash
-grep -n "^class " *.py
+grep -n "^class " *.py | sort -t: -k1,1 -k2,2n
 ```
+
+(The `sort` matters — bare glob order is not stable here.)
 
 Expected output:
 
 ```
-app.py:59:class BookWeaverApp(QMainWindow):
-epub_io.py:40:class Chapter:
+epub_io.py:87:class Chapter:
 llm.py:133:class _MlxLmRuntime:
 llm.py:155:class _MlxVlmRuntime:
-widgets.py:52:class SummarizationSlider(QWidget):
-widgets.py:121:class CreativitySlider(QWidget):
-widgets.py:202:class FilePickerRow(QWidget):
-widgets.py:248:class FolderPickerRow(QWidget):
-widgets.py:286:class LogWidget(QTextEdit):
-widgets.py:314:class ProgressBar(QWidget):
-widgets.py:358:class ChapterListWidget(QWidget):
 wizard.py:36:class WizardWindow(QMainWindow):
 wizard_logic.py:74:class ChapterRow:
 wizard_logic.py:92:class WizardState:
@@ -451,18 +452,18 @@ wizard_steps.py:187:class _Reveal:
 wizard_steps.py:262:class StepTransform(QWidget):
 wizard_steps.py:417:class StepOutput(QWidget):
 wizard_steps.py:667:class StepRun(QWidget):
-wizard_widgets.py:34:class Card(QFrame):
-wizard_widgets.py:65:class Note(QFrame):
-wizard_widgets.py:83:class _ProgressPill(QWidget):
-wizard_widgets.py:113:class RunConsole(QWidget):
-wizard_widgets.py:166:class _SliderTrack(QWidget):
-wizard_widgets.py:182:class WizardSlider(QWidget):
-wizard_widgets.py:347:class _ClickableLabel(QLabel):
-wizard_widgets.py:356:class _ClickableTile(QFrame):
-wizard_widgets.py:368:class StepRail(QWidget):
-wizard_widgets.py:442:class ModeTileGrid(QWidget):
-wizard_widgets.py:509:class _RowMoveButtons(QWidget):
-wizard_widgets.py:547:class TriStateChapterList(QWidget):
+wizard_widgets.py:35:class Card(QFrame):
+wizard_widgets.py:66:class Note(QFrame):
+wizard_widgets.py:84:class _ProgressPill(QWidget):
+wizard_widgets.py:114:class RunConsole(QWidget):
+wizard_widgets.py:167:class _SliderTrack(QWidget):
+wizard_widgets.py:183:class WizardSlider(QWidget):
+wizard_widgets.py:348:class _ClickableLabel(QLabel):
+wizard_widgets.py:357:class _ClickableTile(QFrame):
+wizard_widgets.py:369:class StepRail(QWidget):
+wizard_widgets.py:443:class ModeTileGrid(QWidget):
+wizard_widgets.py:510:class _RowMoveButtons(QWidget):
+wizard_widgets.py:548:class TriStateChapterList(QWidget):
 worker.py:55:class ProcessingWorker(QThread):
 ```
 
@@ -494,30 +495,55 @@ to `1200`. This is not related to any recent changes.
 
 ## Adding a new UI control
 
-1. Add the widget to `widgets.py` if reusable, or inline in `app.py`.
-2. Add the field to `_build_config()` in `app.py`.
-3. Pass it through in the resume config block in `_on_resume()` if it should be re-applied on resume.
+The wizard splits cleanly: **state and the worker contract are Qt-free
+(`wizard_logic.py`), the widget is not**. Start with the state.
+
+1. Add the field to `WizardState` in `wizard_logic.py`, with a default.
+2. Emit it from `build_config()` and add its key to `CONFIG_KEYS` — the
+   frozenset is the worker contract, and `test_wizard_logic.py` asserts the
+   two agree.
+3. Add the widget to the relevant `Step*` class in `wizard_steps.py`
+   (reusable custom-painted ones go in `wizard_widgets.py`). Every step
+   implements the same pair — `load_from(state)` populates the widgets,
+   `apply_to(state)` writes them back. Wire both directions or the value
+   won't survive step navigation.
 4. Extract the value in `worker.py`'s `run()` method.
 5. Pass it to the appropriate prompt builder in `prompts.py` if relevant.
+
+Resume needs no change: `wizard._on_resume` spreads `**config`, so any key
+`build_config()` emits rides along automatically.
 
 ---
 
 ## Adding a new output format
 
-1. Add a `QCheckBox` in `app.py → _add_options_group()` and include it in the `out_fmt` list comprehension in `_build_config()`.
-2. Add a `_write_xxx()` method in `worker.py` — accept `lang_label` as a parameter so the output header reflects the actual language/mode.
-3. Add the branch in `worker.py → run()` after `# ── write output ──`.
+1. Add the key to `_default_formats()` in `wizard_logic.py` and to the
+   `out_format` list comprehension in `build_config()`.
+2. Add a `QCheckBox` to the `self._fmt` dict in `wizard_steps.StepOutput`
+   (the format card wires `stateChanged` for the whole dict automatically).
+3. Add a `_write_xxx()` method in `worker.py` — accept `lang_label` as a
+   parameter so the output header reflects the actual language/mode.
+4. Add the branch in `worker.py → run()` after `# ── write output ──`.
 
 ---
 
 ## Adding a new processing mode
 
-1. Add a radio button to the Processing mode group in `app.py → _add_summarisation_group()`.
-2. Wire any show/hide logic to `_on_mode_changed()` in `app.py`.
-3. Add the mode string to `_build_config()`.
+Modes carry two names: the wizard's short key and the worker's explicit
+string. `MODE_TO_WORKER` in `wizard_logic.py` is the only place they meet.
+
+1. Add the short key → worker string entry to `MODE_TO_WORKER`.
+2. Add a tile to `_MODE_TILES` in `wizard_widgets.py` (title + description);
+   `ModeTileGrid` lays out whatever the tuple contains.
+3. Wire any show/hide logic in `wizard_steps.StepTransform` — Spanish-only
+   cards key off `wizard_logic.derive_target_is_spanish()`, so extend that
+   helper rather than testing the mode string in the widget.
 4. Add the prompt builder function to `prompts.py`.
 5. Add the branch inside the chunk loop in `worker.py → run()`.
-6. Adjust `steps_per_chapter` in `worker.py` if the number of LLM calls per chunk differs.
+6. Adjust `steps_per_chapter` in `worker.py` if the number of LLM calls per
+   chunk differs.
+7. Add the mode to `TARGET_LANG` in `settings.py` and to `MODE_TAG` in
+   `worker.py`, or output files fall back to the `output` tag.
 
 ---
 

@@ -4,12 +4,12 @@ wizard_theme.py
 Palette, stylesheet, and decorative font for the Guided Wizard frontend.
 
 Loads bookweaver.json["wizard_colors"] directly rather than importing
-settings.py — that module's _build() runs at import time and populates the
-*old* UI's globals. Keeping the loaders separate keeps the two themes from
-sharing mutable state.
+settings.py. Keeping the loaders separate is what lets settings.py stay
+theme-free — it knows about models and timeouts, this module knows about
+colour, and neither has to import the other.
 
 Imports stdlib at module scope; PyQt6.QtGui is imported lazily if needed.
-Never settings, never app, never worker.
+Never settings, never worker.
 """
 
 import json
