@@ -125,17 +125,137 @@ def _flatten_toc(toc) -> dict[str, str]:
 
 
 def _resolve_title(doc_name: str, soup: BeautifulSoup,
-                   toc_map: dict[str, str], preview_chars: int) -> str:
-    """TOC title → first heading → text preview → bare filename."""
+                   toc_map: dict[str, str],
+                   preview_chars: int) -> tuple[str, str]:
+    """TOC title → first heading → text preview → bare filename.
+
+    Returns `(title, source)` where source is one of "toc", "heading",
+    "title", "preview", "filename". The caller needs the provenance:
+    only "toc" and "heading" titles are safe to strip from the body
+    (`_strip_title_heading`). A "preview" title is *made of* the body's
+    opening prose, and a `<title>` is often the book's, not the chapter's."""
     base = _basename(doc_name)
     if toc_map.get(base):
-        return toc_map[base]
+        return toc_map[base], "toc"
     for tag in ("h1", "h2", "h3", "title"):
         el = soup.find(tag)
         if el and el.get_text(strip=True):
-            return el.get_text(strip=True)
+            return el.get_text(strip=True), (
+                "title" if tag == "title" else "heading"
+            )
     preview = soup.get_text(separator=" ", strip=True)[:preview_chars].strip()
-    return preview or base
+    return (preview, "preview") if preview else (base, "filename")
+
+
+def _normalize_for_match(text: str) -> str:
+    """Reduce *text* to casefolded alphanumerics for title/heading
+    comparison. Drops whitespace, punctuation and curly quotes, so
+    'CHAPTER 5\\nDUALITY' and 'Chapter 5 Duality' compare equal."""
+    return "".join(c for c in text.casefold() if c.isalnum())
+
+
+#  Containers we will descend *through* to find the real content root.
+#  Deliberately excludes p/h1-h6/span: descending into those would let the
+#  heading scan consume inline fragments and split a paragraph mid-sentence.
+_WRAPPER_TAGS = {"body", "div", "section", "article", "main"}
+
+#  A whole element that is nothing but a structural label ('CHAPTER 1',
+#  'PART IV', '7'). Matched against fully-normalized element text, so the
+#  roman-numeral class can only fire on an element that is *entirely* such
+#  a word — verified across the 494 strip-eligible chapters in books/ with
+#  no false positives.
+_LABEL_ONLY = re.compile(r"^(?:chapter|part|section|book)?[0-9ivxlcdm]+$")
+
+#  The same label at the START of a normalized title ('1. Capitalism' →
+#  '1capitalism'). Digits only: stripping a roman-numeral prefix here would
+#  eat the leading 'i' of titles like 'I Promise'.
+_TITLE_LABEL_PREFIX = re.compile(r"^(?:chapter|part|section|book)?\d+")
+
+
+def _content_root(soup: BeautifulSoup):
+    """The element whose children are the chapter's top-level blocks.
+
+    Many EPUBs wrap an entire chapter in a single `<div>`, which would
+    leave `<body>` with one child holding both the heading and all the
+    prose — indistinguishable from a chapter with no heading. Descend
+    while the current node's only element child is itself a block
+    wrapper."""
+    node = soup.find("body") or soup
+    while True:
+        children = node.find_all(recursive=False)
+        if len(children) != 1 or children[0].name not in _WRAPPER_TAGS:
+            return node
+        node = children[0]
+
+
+def _strip_title_heading(soup: BeautifulSoup, title: str) -> None:
+    """Remove the chapter's own display heading from *soup*, in place.
+
+    The heading is redundant — the worker prepends the resolved title to
+    every chapter block itself — and actively harmful: left in the body it
+    reaches the LLM as source text, which echoes it into the summary, so
+    the title lands in the output twice.
+
+    Publishers mark headings up too variously to match on tag or class
+    (one real book wraps `<p class="chap">CHAPTER 1</p>` and `<h2>` in a
+    `<div class="head">`), so this consumes *leading elements* while their
+    accumulated normalized text is a prefix of the normalized title, and
+    removes them only on a **complete** match. A partial match strips
+    nothing: 'CHAPTER 3' alone under the title 'Chapter 3 Know Your
+    Triggers' could just as easily be prose, and deleting real content is
+    far worse than leaving a duplicated heading.
+
+    Elements are consumed whole, never split, so a heading running into a
+    paragraph via `<br>` can't take the paragraph's first sentence with it.
+
+    Structural labels get one allowance, because the TOC and the body
+    routinely spell the same label differently ('1. Capitalism' vs
+    'CHAPTER 1' + 'Capitalism'): a *leading, label-only* element may be
+    consumed without contributing to the match, and a leading label may be
+    dropped from the title. Everything after that must still reconstruct
+    the title exactly, so the allowance can never cause a partial removal.
+    """
+    target = _normalize_for_match(title)
+    if not target:
+        return
+    # Try the title as-is first, then without its own leading label.
+    candidates = [target]
+    bare = _TITLE_LABEL_PREFIX.sub("", target)
+    if bare and bare != target:
+        candidates.append(bare)
+    for cand in candidates:
+        consumed = _match_leading_heading(_content_root(soup), cand)
+        if consumed:
+            for el in consumed:
+                el.decompose()
+            return
+
+
+def _match_leading_heading(root, target: str) -> list:
+    """Leading elements of *root* that together reconstruct *target*, or
+    [] if they don't. Returning [] on anything short of a complete match is
+    what makes this safe to delete: 'CHAPTER 3' alone under the title
+    'Chapter 3 Know Your Triggers' could just as easily be prose."""
+    acc = ""
+    consumed = []
+    for child in root.find_all(recursive=False):
+        chunk = _normalize_for_match(child.get_text())
+        if not chunk:
+            # Decorative <img>/<br>/empty <p> between heading parts: skip
+            # without consuming, so a chapter illustration survives.
+            continue
+        if not target.startswith(acc + chunk):
+            # A leading label the title renders differently ('CHAPTER 1'
+            # for '1.'): consume it, but require the rest to match anyway.
+            if not acc and _LABEL_ONLY.match(chunk):
+                consumed.append(child)
+                continue
+            return []
+        acc += chunk
+        consumed.append(child)
+        if acc == target:
+            return consumed
+    return []
 
 
 def _mark_separator_lines(text: str) -> str:
@@ -194,7 +314,18 @@ def extract_chapters(path: str, preview_chars: int = 50,
         # preview-fallback title.
         text = soup.get_text(separator="\n").strip()
         if len(text) > MIN_CHAPTER_CHARS:
-            title = _resolve_title(item.get_name(), soup, toc_map, preview_chars)
+            title, source = _resolve_title(
+                item.get_name(), soup, toc_map, preview_chars
+            )
+            # Drop the chapter's own heading so it can't reach the LLM and
+            # be echoed back under the title the worker already prepends.
+            # After the length filter (a heading-heavy short chapter must
+            # not drop out and shift every selected_chapters index) and
+            # before the scene-break branch (both reads must see the same
+            # stripped body, or the app/worker index parity breaks).
+            if source in ("toc", "heading"):
+                _strip_title_heading(soup, title)
+                text = soup.get_text(separator="\n").strip()
             if mark_scene_breaks:
                 for hr in soup.find_all("hr"):
                     hr.replace_with(f"\n{SCENE_BREAK}\n")

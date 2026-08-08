@@ -172,42 +172,42 @@ class TestWriteTxt:
 
     def test_file_is_created(self, tmp_path):
         w = _make_worker()
-        out = w._write_txt(self.RESULTS, tmp_path, "mi_libro", "B2", self.META)
+        out = w._write_txt(self.RESULTS, tmp_path, "mi_libro_ES_B2_summary", self.META)
         assert out.exists()
 
     def test_filename_contains_stem_level(self, tmp_path):
         w = _make_worker()
-        out = w._write_txt(self.RESULTS, tmp_path, "mi_libro", "C1", self.META)
+        out = w._write_txt(self.RESULTS, tmp_path, "mi_libro_ES_C1_summary", self.META)
         assert "mi_libro" in out.name
         assert "C1" in out.name
 
     def test_extension_is_txt(self, tmp_path):
         w = _make_worker()
-        out = w._write_txt(self.RESULTS, tmp_path, "test", "B2", self.META)
+        out = w._write_txt(self.RESULTS, tmp_path, "test_ES_B2_summary", self.META)
         assert out.suffix == ".txt"
 
     def test_title_in_output(self, tmp_path):
         w = _make_worker()
-        out = w._write_txt(self.RESULTS, tmp_path, "test", "B2", self.META)
+        out = w._write_txt(self.RESULTS, tmp_path, "test_ES_B2_summary", self.META)
         content = out.read_text(encoding="utf-8")
         assert "Mi Libro" in content
 
     def test_author_in_output(self, tmp_path):
         w = _make_worker()
-        out = w._write_txt(self.RESULTS, tmp_path, "test", "B2", self.META)
+        out = w._write_txt(self.RESULTS, tmp_path, "test_ES_B2_summary", self.META)
         content = out.read_text(encoding="utf-8")
         assert "Jane Doe" in content
 
     def test_all_chapter_bodies_in_output(self, tmp_path):
         w = _make_worker()
-        out = w._write_txt(self.RESULTS, tmp_path, "test", "B2", self.META)
+        out = w._write_txt(self.RESULTS, tmp_path, "test_ES_B2_summary", self.META)
         content = out.read_text(encoding="utf-8")
         for _, body in self.RESULTS:
             assert body in content
 
     def test_all_chapter_titles_in_output(self, tmp_path):
         w = _make_worker()
-        out = w._write_txt(self.RESULTS, tmp_path, "test", "B2", self.META)
+        out = w._write_txt(self.RESULTS, tmp_path, "test_ES_B2_summary", self.META)
         content = out.read_text(encoding="utf-8")
         for title, _ in self.RESULTS:
             assert title in content
@@ -215,20 +215,20 @@ class TestWriteTxt:
     def test_empty_title_does_not_crash(self, tmp_path):
         w = _make_worker()
         meta = {**self.META, "title": "", "creator": ""}
-        out = w._write_txt(self.RESULTS, tmp_path, "test", "B2", meta)
+        out = w._write_txt(self.RESULTS, tmp_path, "test_ES_B2_summary", meta)
         assert out.exists()
 
     def test_single_chapter(self, tmp_path):
         w = _make_worker()
         results = [("Capítulo 1", "Una sola frase.")]
-        out = w._write_txt(results, tmp_path, "test", "B2", self.META)
+        out = w._write_txt(results, tmp_path, "test_ES_B2_summary", self.META)
         content = out.read_text(encoding="utf-8")
         assert "Una sola frase." in content
 
     def test_encoding_utf8_special_chars(self, tmp_path):
         w = _make_worker()
         results = [("Capítulo 1", "¿Cómo estás? ¡Bien, gracias! — Ñoño.")]
-        out = w._write_txt(results, tmp_path, "test", "B2", self.META)
+        out = w._write_txt(results, tmp_path, "test_ES_B2_summary", self.META)
         content = out.read_text(encoding="utf-8")
         assert "¿Cómo estás?" in content
 
@@ -250,7 +250,7 @@ class TestWriteEpub:
         from ebooklib import epub as ebooklib_epub
         w = _make_worker()
         out = w._write_epub(
-            self.RESULTS, tmp_path, "cuento", "B2", self.META, ebooklib_epub
+            self.RESULTS, tmp_path, "cuento_ES_B2_summary", self.META, ebooklib_epub
         )
         assert out.exists()
 
@@ -259,7 +259,7 @@ class TestWriteEpub:
         from ebooklib import epub as ebooklib_epub
         w = _make_worker()
         out = w._write_epub(
-            self.RESULTS, tmp_path, "cuento", "B2", self.META, ebooklib_epub
+            self.RESULTS, tmp_path, "cuento_ES_B2_summary", self.META, ebooklib_epub
         )
         assert out.suffix == ".epub"
 
@@ -268,10 +268,36 @@ class TestWriteEpub:
         from ebooklib import epub as ebooklib_epub
         w = _make_worker()
         out = w._write_epub(
-            self.RESULTS, tmp_path, "cuento", "C1", self.META, ebooklib_epub
+            self.RESULTS, tmp_path, "cuento_ES_C1_summary", self.META, ebooklib_epub
         )
         assert "cuento" in out.name
         assert "C1" in out.name
+
+    def _description(self, tmp_path, backend):
+        """Run _write_epub against a mock ebooklib and return the
+        dc:description string it set."""
+        fake_epub = MagicMock()
+        book = fake_epub.EpubBook.return_value
+        w = _make_worker({"backend": backend})
+        w._write_epub(
+            self.RESULTS, tmp_path, "cuento_ES_B2_summary", self.META, fake_epub
+        )
+        return next(
+            call.args[2] for call in book.add_metadata.call_args_list
+            if call.args[1] == "description"
+        )
+
+    def test_description_names_the_mlx_engine(self, tmp_path):
+        assert "mlx-lm" in self._description(tmp_path, "mlx")
+
+    def test_description_names_the_ollama_engine(self, tmp_path):
+        assert "Ollama" in self._description(tmp_path, "ollama")
+
+    def test_description_does_not_hardcode_ollama_on_mlx(self, tmp_path):
+        assert "Ollama" not in self._description(tmp_path, "mlx")
+
+    def test_unknown_backend_falls_back_to_its_raw_name(self, tmp_path):
+        assert "vllm" in self._description(tmp_path, "vllm")
 
     def test_fallback_to_txt_on_epub_write_failure(self, tmp_path):
         """If ebooklib raises, _write_epub must fall back to a .txt file."""
@@ -279,7 +305,7 @@ class TestWriteEpub:
         broken_epub = MagicMock()
         broken_epub.EpubBook.side_effect = RuntimeError("simulated failure")
         out = w._write_epub(
-            self.RESULTS, tmp_path, "cuento", "B2", self.META, broken_epub
+            self.RESULTS, tmp_path, "cuento_ES_B2_summary", self.META, broken_epub
         )
         assert out.suffix == ".txt"
         assert out.exists()
@@ -296,7 +322,7 @@ class TestWriteEpub:
         results = [("Capítulo 1", "Tom & Jerry said <hello> to each other.")]
         w = _make_worker()
         out = w._write_epub(
-            results, tmp_path, "test", "B2", self.META, ebooklib_epub
+            results, tmp_path, "test_ES_B2_summary", self.META, ebooklib_epub
         )
         # EPUB is a ZIP — check xhtml content inside
         with zipfile.ZipFile(out) as zf:
@@ -384,7 +410,7 @@ class TestRunChapterSelection:
             w.run()
 
         # 1. The per-chapter subfolder exists and holds EXACTLY 2 files.
-        chapters_dir = tmp_path / "mybook_ES_B2_chapters"
+        chapters_dir = tmp_path / "mybook_ES_B2_translation_chapters"
         assert chapters_dir.is_dir()
         files = sorted(p.name for p in chapters_dir.glob("*.txt"))
         assert len(files) == 2
@@ -437,14 +463,14 @@ class TestRunChapterOrdering:
         self._run(tmp_path, {"selected_chapters": [2, 0],
                              "chapter_numbering": "position"})
         files = sorted(
-            p.name for p in (tmp_path / "mybook_ES_B2_chapters").glob("*.txt")
+            p.name for p in (tmp_path / "mybook_ES_B2_translation_chapters").glob("*.txt")
         )
         assert files == ["01 - Gamma.txt", "02 - Alpha.txt"]
 
     def test_default_book_numbering_keeps_fulllist_index(self, tmp_path):
         self._run(tmp_path, {"selected_chapters": [2, 0]})
         files = sorted(
-            p.name for p in (tmp_path / "mybook_ES_B2_chapters").glob("*.txt")
+            p.name for p in (tmp_path / "mybook_ES_B2_translation_chapters").glob("*.txt")
         )
         assert files == ["01 - Alpha.txt", "03 - Gamma.txt"]
 
@@ -458,7 +484,7 @@ class TestRunChapterOrdering:
                              "mode": "summarise_key_ideas",
                              "summary_lang": "en"})
         files = sorted(
-            p.name for p in (tmp_path / "mybook_ES_B2_chapters").glob("*.txt")
+            p.name for p in (tmp_path / "mybook_EN_key-ideas_chapters").glob("*.txt")
         )
         assert len(files) == 3
         assert files[0].startswith("01 - Gamma")
@@ -482,23 +508,117 @@ class TestSafeFilename:
         assert ProcessingWorker._safe_filename("   ") == "untitled"
 
 
+class TestRunOutputNaming:
+    """End-to-end naming through run(): meta_title drives the stem, and
+    the language/mode tags follow the run's actual configuration."""
+
+    CHAPTERS = [epub_io.Chapter(0, "c0.xhtml", "Alpha", "alpha text")]
+
+    def _run(self, tmp_path, extra):
+        cfg = {
+            "epub_path": str(tmp_path / "mybook.epub"),
+            "out_format": ["txt"],
+            "out_folder": str(tmp_path),
+            "mode": "translate",
+            "level": "B2",
+            "keep_pct": 40,
+            "model": "m",
+            "creativity": 5,
+            "chunk_size": 2000,
+            **extra,
+        }
+        w = _make_worker(cfg)
+        with patch.object(ProcessingWorker, "_llm_call", return_value="texto"), \
+                patch.object(epub_io, "extract_chapters",
+                             return_value=self.CHAPTERS):
+            w.run()
+        return w
+
+    def test_meta_title_becomes_the_stem(self, tmp_path):
+        self._run(tmp_path, {"meta_title": "La Casa Verde"})
+        assert (tmp_path / "La Casa Verde_ES_B2_translation.txt").exists()
+        assert (tmp_path / "La Casa Verde_ES_B2_translation_chapters").is_dir()
+
+    def test_falls_back_to_epub_stem_when_title_blank(self, tmp_path):
+        self._run(tmp_path, {"meta_title": ""})
+        assert (tmp_path / "mybook_ES_B2_translation.txt").exists()
+
+    def test_english_run_is_named_en_without_level(self, tmp_path):
+        self._run(tmp_path, {"mode": "summarise_only"})
+        # Assert over what the run actually produced, so a basename that
+        # regains "ES"/"B2" fails here instead of passing vacuously.
+        written = sorted(p.name for p in tmp_path.glob("*.txt"))
+        assert written == ["mybook_EN_summary.txt"]
+
+    def test_key_ideas_language_follows_summary_lang(self, tmp_path):
+        self._run(tmp_path, {"mode": "summarise_key_ideas",
+                             "summary_lang": "es"})
+        assert (tmp_path / "mybook_ES_B2_key-ideas.txt").exists()
+
+
+class TestOutputBasename:
+    """`{title}_{LANG}[_{level}]_{mode tag}` — the shared basename behind
+    every .txt/.epub/.html/.mp3 file and the per-chapter subfolder."""
+
+    def test_spanish_modes_keep_the_level(self):
+        assert ProcessingWorker._output_basename(
+            "mybook", "translate", "es", "B2") == "mybook_ES_B2_translation"
+        assert ProcessingWorker._output_basename(
+            "mybook", "summarise_rewrite", "es", "C1") == "mybook_ES_C1_summary"
+        assert ProcessingWorker._output_basename(
+            "mybook", "summarise_key_ideas", "es", "B1"
+        ) == "mybook_ES_B1_key-ideas"
+
+    def test_english_output_drops_the_level(self):
+        # No English prompt consumes the CEFR level, so naming one would
+        # advertise a setting that never applied.
+        assert ProcessingWorker._output_basename(
+            "mybook", "summarise_only", "en", "B2") == "mybook_EN_summary"
+        assert ProcessingWorker._output_basename(
+            "mybook", "summarise_key_ideas", "en", "B2"
+        ) == "mybook_EN_key-ideas"
+
+    def test_modes_at_same_level_do_not_collide(self):
+        # The pre-mode-tag scheme gave both of these `mybook_ES_B2`,
+        # so a translate run silently overwrote a summarise run.
+        a = ProcessingWorker._output_basename("mybook", "translate", "es", "B2")
+        b = ProcessingWorker._output_basename(
+            "mybook", "summarise_rewrite", "es", "B2")
+        assert a != b
+
+    def test_title_is_sanitised(self):
+        out = ProcessingWorker._output_basename(
+            "War / Peace: vol 1", "translate", "es", "B2")
+        assert "/" not in out and ":" not in out
+        assert out == "War Peace vol 1_ES_B2_translation"
+
+    def test_blank_title_falls_back_to_untitled(self):
+        assert ProcessingWorker._output_basename(
+            "   ", "translate", "es", "B2") == "untitled_ES_B2_translation"
+
+    def test_unknown_mode_gets_a_generic_tag(self):
+        assert ProcessingWorker._output_basename(
+            "mybook", "brand_new_mode", "es", "B2") == "mybook_ES_B2_output"
+
+
 class TestWriteChapterFile:
     def test_creates_subfolder_and_numbered_file(self, tmp_path):
         w = _make_worker()
-        out = w._write_chapter_file(tmp_path, "mybook", "B2", 2, "The Title", "Body.")
-        assert out.parent.name == "mybook_ES_B2_chapters"
+        out = w._write_chapter_file(tmp_path, "mybook_ES_B2_translation", 2,
+                                    "The Title", "Body.")
+        assert out.parent.name == "mybook_ES_B2_translation_chapters"
         assert out.name == "03 - The Title.txt"
         assert out.exists()
 
     def test_file_contains_block(self, tmp_path):
         w = _make_worker()
-        out = w._write_chapter_file(tmp_path, "b", "B2", 0, "T", "Hello body")
+        out = w._write_chapter_file(tmp_path, "b_ES_B2_summary", 0, "T", "Hello body")
         text = out.read_text(encoding="utf-8")
         assert "T" in text and "Hello body" in text
 
     def test_index_zero_is_one_padded(self, tmp_path):
         w = _make_worker()
-        out = w._write_chapter_file(tmp_path, "b", "B2", 0, "First", "x")
+        out = w._write_chapter_file(tmp_path, "b_ES_B2_summary", 0, "First", "x")
         assert out.name.startswith("01 - ")
 
 

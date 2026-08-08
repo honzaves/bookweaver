@@ -31,6 +31,24 @@ from prompts import (
 from settings import creativity_to_temperature, OLLAMA_TIMEOUT, SETTINGS
 
 
+# Short tag naming the processing that produced a file. Part of every
+# output basename, so two modes run on the same book can't overwrite
+# each other. summarise_rewrite and summarise_only share "summary" —
+# they never collide because their output languages differ.
+MODE_TAG = {
+    "summarise_rewrite":   "summary",
+    "translate":           "translation",
+    "summarise_only":      "summary",
+    "summarise_key_ideas": "key-ideas",
+}
+
+# Display name for the LLM backend, used in generated EPUB metadata.
+ENGINE_LABEL = {
+    "mlx":    "mlx-lm",
+    "ollama": "Ollama",
+}
+
+
 # ──────────────────────────────────────────────────────────────
 #  WORKER
 # ──────────────────────────────────────────────────────────────
@@ -168,7 +186,16 @@ class ProcessingWorker(QThread):
             steps_per_chapter = 2
         total_steps = len(chapters) * steps_per_chapter
         out_formats = out_format if isinstance(out_format, list) else [out_format]
-        stem = Path(epub_path).stem
+        # Output language, derived from mode + summary_lang rather than
+        # cfg["target_lang"] (TARGET_LANG hardcodes "es" for key-ideas,
+        # which is wrong when summary_lang is "en"). Decided once here:
+        # the per-chapter files are written inside the loop but the
+        # assembled outputs after it, and both must agree.
+        out_lang = "en" if (
+            mode == "summarise_only"
+            or (mode == "summarise_key_ideas" and summary_lang == "en")
+        ) else "es"
+        base = self._output_basename(meta["title"], mode, out_lang, level)
         # Seed results and progress from any previously completed chapters.
         results: list[tuple[str, str]] = list(cfg.get("prior_results", []))
         step = resume_from * steps_per_chapter
@@ -403,7 +430,7 @@ class ProcessingWorker(QThread):
             self.completed_results = results[:]
             if "txt" in out_formats:
                 self._write_chapter_file(
-                    out_folder, stem, level,
+                    out_folder, base,
                     idx if numbering == "position" else chapter.index,
                     chapter.title,
                     chapter_body,
@@ -436,7 +463,7 @@ class ProcessingWorker(QThread):
                     # count under position numbering, full-list count under
                     # book numbering; title is the localized book header.
                     self._write_chapter_file(
-                        out_folder, stem, level,
+                        out_folder, base,
                         len(chapters) if numbering == "position"
                         else len(all_chapters),
                         book_header, book_body,
@@ -450,35 +477,32 @@ class ProcessingWorker(QThread):
 
         # ── write output ──────────────────────────────────────
         out_folder.mkdir(parents=True, exist_ok=True)
-        if mode == "summarise_only" or (
-            mode == "summarise_key_ideas" and summary_lang == "en"
-        ):
-            lang_label = "English summary"
-        else:
-            lang_label = f"Spanish {level}"
+        lang_label = (
+            "English summary" if out_lang == "en" else f"Spanish {level}"
+        )
         out_paths = []
 
         for fmt in out_formats:
             if fmt == "txt":
                 out_paths.append(
-                    self._write_txt(results, out_folder, stem, level, meta, lang_label)
+                    self._write_txt(results, out_folder, base, meta, lang_label)
                 )
             elif fmt == "epub":
                 out_paths.append(
                     self._write_epub(
-                        results, out_folder, stem, level, meta, ebooklib_epub, lang_label
+                        results, out_folder, base, meta, ebooklib_epub, lang_label
                     )
                 )
             elif fmt == "html":
                 out_paths.append(
-                    self._write_html(results, out_folder, stem, level, meta, lang_label)
+                    self._write_html(results, out_folder, base, meta, lang_label)
                 )
 
         # ── MP3 audiobook (optional) ──────────────────────────
         # Guard on "txt" is defensive — the UI already enforces it — but
         # keeps the worker correct in isolation.
         if cfg.get("generate_mp3") and "txt" in out_formats:
-            self._generate_mp3(results, out_folder, stem, level, meta, cfg)
+            self._generate_mp3(results, out_folder, base, meta, cfg)
 
         self.finished.emit(True, ", ".join(str(p) for p in out_paths))
 
@@ -487,8 +511,7 @@ class ProcessingWorker(QThread):
         self,
         results: list[tuple[str, str]],
         out_folder: Path,
-        stem: str,
-        level: str,
+        base: str,
         meta: dict,
         cfg: dict,
     ) -> None:
@@ -517,7 +540,7 @@ class ProcessingWorker(QThread):
             return
         lang_code = kokoro_lang_code(cfg.get("target_lang", "es"), voice)
         tts_cfg = SETTINGS.get("tts", {})
-        out_path = out_folder / f"{stem}_ES_{level}.mp3"
+        out_path = out_folder / f"{base}.mp3"
 
         self.log.emit(
             f"\n🔊  Synthesising audiobook with voice '{voice}' "
@@ -566,22 +589,45 @@ class ProcessingWorker(QThread):
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         return cleaned[:80].strip() or "untitled"
 
+    @staticmethod
+    def _output_basename(
+        title: str,
+        mode: str,
+        out_lang: str,
+        level: str,
+    ) -> str:
+        """Return the shared basename for every file a run produces:
+        `{title}_{LANG}[_{level}]_{mode tag}`.
+
+        *title* is the user's book title (meta_title), falling back to the
+        source EPUB stem — sanitised via `_safe_filename`, so a typed title
+        containing `/` or `:` is safe and any title is capped at 80 chars.
+
+        The CEFR *level* appears only for Spanish output: on the English
+        path `prompts._key_ideas_lang_line` ignores it and no other English
+        prompt takes a level, so stamping one on an English file would name
+        a setting that never applied."""
+        parts = [ProcessingWorker._safe_filename(title), out_lang.upper()]
+        if out_lang == "es":
+            parts.append(level)
+        parts.append(MODE_TAG.get(mode, "output"))
+        return "_".join(parts)
+
     def _write_chapter_file(
         self,
         out_folder: Path,
-        stem: str,
-        level: str,
+        base: str,
         index: int,
         title: str,
         body: str,
     ) -> Path:
         """Write a single chapter's result to
-        {stem}_ES_{level}_chapters/{NN} - {title}.txt and return the path.
+        {base}_chapters/{NN} - {title}.txt and return the path.
         NN = index + 1; which index the caller passes depends on
         chapter_numbering — chapter.index under "book" (the default), the
         0-based processing position under "position" — so NN matches the
         chapter list of whichever frontend launched the run."""
-        chapters_dir = out_folder / f"{stem}_ES_{level}_chapters"
+        chapters_dir = out_folder / f"{base}_chapters"
         chapters_dir.mkdir(parents=True, exist_ok=True)
         fname = f"{index + 1:02d} - {self._safe_filename(title)}.txt"
         out_path = chapters_dir / fname
@@ -594,18 +640,19 @@ class ProcessingWorker(QThread):
         self,
         results: list[tuple[str, str]],
         out_folder: Path,
-        stem: str,
-        level: str,
+        base: str,
         meta: dict,
         lang_label: str = "",
     ) -> Path:
-        out_path = out_folder / f"{stem}_ES_{level}.txt"
+        out_path = out_folder / f"{base}.txt"
         with open(out_path, "w", encoding="utf-8") as fh:
             if meta["title"]:
                 fh.write(f"{meta['title']}\n")
             if meta["creator"]:
                 fh.write(f"by {meta['creator']}\n")
-            fh.write(f"{lang_label or f'Spanish ({level})'}\n{'─' * 60}\n\n")
+            if lang_label:
+                fh.write(f"{lang_label}\n")
+            fh.write(f"{'─' * 60}\n\n")
             for title, body in results:
                 fh.write(self._chapter_block(title, body))
         self.log.emit(f"\n📄  Saved plain text → {out_path}", "success")
@@ -615,26 +662,26 @@ class ProcessingWorker(QThread):
         self,
         results: list[tuple[str, str]],
         out_folder: Path,
-        stem: str,
-        level: str,
+        base: str,
         meta: dict,
         ebooklib_epub,
         lang_label: str = "",
     ) -> Path:
-        label = lang_label or f"Spanish {level}"
-        out_path = out_folder / f"{stem}_ES_{level}.epub"
+        label = lang_label or "BookWeaver output"
+        out_path = out_folder / f"{base}.epub"
         try:
             out_book = ebooklib_epub.EpubBook()
-            out_book.set_title(meta["title"] or f"{stem} ({label})")
+            out_book.set_title(meta["title"] or f"{base} ({label})")
             out_book.set_language(meta["language"])
             if meta["creator"]:
                 out_book.add_author(meta["creator"])
             if meta["contributor"]:
                 out_book.add_metadata("DC", "contributor", meta["contributor"])
+            engine = ENGINE_LABEL.get(self._backend, self._backend)
             out_book.add_metadata(
                 "DC",
                 "description",
-                f"{label} generated by BookWeaver via Ollama.",
+                f"{label} generated by BookWeaver via {engine}.",
             )
 
             spine = ["nav"]
@@ -690,14 +737,13 @@ class ProcessingWorker(QThread):
         self,
         results: list[tuple[str, str]],
         out_folder: Path,
-        stem: str,
-        level: str,
+        base: str,
         meta: dict,
         lang_label: str = "",
     ) -> Path:
-        label = lang_label or f"Spanish {level}"
-        out_path = out_folder / f"{stem}_ES_{level}.html"
-        title = html.escape(meta["title"] or f"{stem} ({label})")
+        label = lang_label or "BookWeaver output"
+        out_path = out_folder / f"{base}.html"
+        title = html.escape(meta["title"] or f"{base} ({label})")
         author = html.escape(meta["creator"]) if meta["creator"] else ""
 
         chapters_html = []

@@ -69,20 +69,245 @@ class TestFlattenToc:
 
 
 class TestResolveTitle:
+    """Returns (title, source); the source drives whether the heading may
+    be stripped from the body — see TestHeadingNotDuplicatedInBody."""
+
     def test_prefers_toc(self):
         soup = BeautifulSoup("<h1>Heading</h1>", "html.parser")
         title = epub_io._resolve_title(
             "chap_01.xhtml", soup, {"chap_01.xhtml": "TOC Title"}, 50
         )
-        assert title == "TOC Title"
+        assert title == ("TOC Title", "toc")
 
     def test_falls_back_to_heading(self):
         soup = BeautifulSoup("<h2>My Heading</h2><p>body</p>", "html.parser")
-        assert epub_io._resolve_title("x.xhtml", soup, {}, 50) == "My Heading"
+        assert epub_io._resolve_title(
+            "x.xhtml", soup, {}, 50) == ("My Heading", "heading")
 
     def test_falls_back_to_text_preview(self):
         soup = BeautifulSoup("<p>Once upon a midnight dreary</p>", "html.parser")
-        assert epub_io._resolve_title("x.xhtml", soup, {}, 10) == "Once upon"
+        assert epub_io._resolve_title(
+            "x.xhtml", soup, {}, 10) == ("Once upon", "preview")
+
+    def test_document_title_tag_is_not_a_heading(self):
+        # <title> is often the BOOK's title, so it must not authorise a
+        # strip of the chapter body.
+        soup = BeautifulSoup("<title>Book Name</title><p>body</p>",
+                             "html.parser")
+        assert epub_io._resolve_title(
+            "x.xhtml", soup, {}, 50) == ("Book Name", "title")
+
+    def test_falls_back_to_filename(self):
+        soup = BeautifulSoup("", "html.parser")
+        assert epub_io._resolve_title(
+            "x.xhtml", soup, {}, 50) == ("x.xhtml", "filename")
+
+
+class TestNormalizeForMatch:
+    def test_drops_case_punctuation_and_space(self):
+        assert epub_io._normalize_for_match(
+            "Chapter 1 Who are You?") == "chapter1whoareyou"
+
+    def test_matches_all_caps_heading_to_mixed_case_title(self):
+        heading = epub_io._normalize_for_match("CHAPTER 5\nDUALITY")
+        assert heading == epub_io._normalize_for_match("Chapter 5 Duality")
+
+    def test_drops_curly_quotes(self):
+        assert epub_io._normalize_for_match("“Quoted”") == "quoted"
+
+    def test_empty_input(self):
+        assert epub_io._normalize_for_match("  \n ") == ""
+
+
+class TestHeadingNotDuplicatedInBody:
+    """The chapter's own heading must not survive in Chapter.text: the
+    worker prepends the resolved title in its own `===` block, and the
+    heading otherwise reaches the LLM, which echoes it into the summary."""
+
+    HEAD = ('<div class="head"><p class="chap">CHAPTER 1</p>'
+            '<h2>WHO ARE YOU?</h2></div>')
+
+    def test_toc_title_heading_is_removed(self, tmp_path):
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml", f"{self.HEAD}{BODY}")],
+            toc=(epub.Link("chap_01.xhtml", "Chapter 1 Who are You?", "c1"),),
+        )
+        ch = extract_chapters(path)[0]
+        assert ch.title == "Chapter 1 Who are You?"
+        assert "WHO ARE YOU?" not in ch.text
+        assert ch.text.startswith("word")
+
+    def test_heading_derived_title_is_removed(self, tmp_path):
+        path = _build_epub(tmp_path, [
+            ("chap_01.xhtml", f"<h1>The Element of Fear</h1>{BODY}"),
+        ])
+        ch = extract_chapters(path)[0]
+        assert ch.title == "The Element of Fear"
+        assert "Element of Fear" not in ch.text
+
+    def test_split_heading_across_sibling_elements(self, tmp_path):
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml", f"<p>CHAPTER 2</p><h2>DUALITY</h2>{BODY}")],
+            toc=(epub.Link("chap_01.xhtml", "Chapter 2 Duality", "c1"),),
+        )
+        ch = extract_chapters(path)[0]
+        assert "DUALITY" not in ch.text
+        assert ch.text.startswith("word")
+
+    def test_descends_through_a_single_wrapper_div(self, tmp_path):
+        # Many EPUBs wrap the whole chapter in one <div>, so the direct
+        # children of <body> are a single element holding everything.
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml",
+              f'<div><h1>Chapter 1</h1><h2>Email Reduces Productivity</h2>'
+              f'{BODY}</div>')],
+            toc=(epub.Link("chap_01.xhtml",
+                           "Chapter 1: Email Reduces Productivity", "c1"),),
+        )
+        ch = extract_chapters(path)[0]
+        assert "Email Reduces Productivity" not in ch.text
+        assert ch.text.startswith("word")
+
+    def test_wrapper_heading_followed_by_bare_text_node(self, tmp_path):
+        # <body> has ONE element child (the heading div) plus a bare text
+        # node of prose. find_all(recursive=False) ignores text nodes, so
+        # the descent lands inside the heading — the prose must survive.
+        html = "<div><h1>Chapter 1</h1><h2>Duality</h2></div>" + "word " * 80
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml", html)],
+            toc=(epub.Link("chap_01.xhtml", "Chapter 1 Duality", "c1"),),
+        )
+        ch = extract_chapters(path)[0]
+        assert "Duality" not in ch.text
+        assert ch.text.startswith("word")
+        assert len(ch.text) > 200
+
+    def test_does_not_descend_into_a_paragraph(self, tmp_path):
+        # A single-<p> document must never have its inline spans consumed
+        # piecemeal — elements are removed whole or not at all.
+        html = ("<p><span>Alpha</span><span> and the rest of the prose. "
+                "</span>" + ("word " * 80) + "</p>")
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml", html)],
+            toc=(epub.Link("chap_01.xhtml", "Alpha", "c1"),),
+        )
+        ch = extract_chapters(path)[0]
+        assert ch.text.startswith("Alpha")
+
+    def test_preview_derived_title_leaves_body_intact(self, tmp_path):
+        # The title IS the body's opening here, so prefix-matching would
+        # delete real prose. Must be a no-op.
+        path = _build_epub(tmp_path, [("chap_01.xhtml", BODY)])
+        ch = extract_chapters(path)[0]
+        assert ch.text.startswith("word")
+        assert len(ch.text) > 200
+
+    def test_title_absent_from_body_strips_nothing(self, tmp_path):
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml", f"<p>An opening line.</p>{BODY}")],
+            toc=(epub.Link("chap_01.xhtml", "Unrelated Title", "c1"),),
+        )
+        ch = extract_chapters(path)[0]
+        assert ch.text.startswith("An opening line.")
+
+    def test_partial_prefix_match_strips_nothing(self, tmp_path):
+        # Body says only "CHAPTER 3"; the title continues past it. Removing
+        # on a partial match risks eating prose, so it must be a no-op.
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml", f"<p>CHAPTER 3</p>{BODY}")],
+            toc=(epub.Link("chap_01.xhtml", "Chapter 3 Know Your Triggers",
+                           "c1"),),
+        )
+        ch = extract_chapters(path)[0]
+        assert ch.text.startswith("CHAPTER 3")
+
+    def test_chapter_count_and_indices_unchanged(self, tmp_path):
+        # The MIN_CHAPTER_CHARS filter must run on pre-strip text, or a
+        # short chapter can drop out and shift every selected_chapters index.
+        short = "<p>" + ("word " * 45) + "</p>"   # ~225 chars, > 200
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml", f"<h1>A Fairly Long Heading Indeed</h1>{short}"),
+             ("chap_02.xhtml", f"<h1>Two</h1>{BODY}")],
+        )
+        chapters = extract_chapters(path)
+        assert [c.index for c in chapters] == [0, 1]
+
+    def test_marked_and_unmarked_reads_agree(self, tmp_path):
+        # CLAUDE.md invariant: counts/indices/titles identical either way.
+        path = _build_epub(
+            tmp_path,
+            [("chap_01.xhtml", f"{self.HEAD}{BODY}")],
+            toc=(epub.Link("chap_01.xhtml", "Chapter 1 Who are You?", "c1"),),
+        )
+        plain = extract_chapters(path)
+        marked = extract_chapters(path, mark_scene_breaks=True)
+        assert [(c.index, c.title) for c in plain] == \
+               [(c.index, c.title) for c in marked]
+        assert plain[0].text == marked[0].text
+
+
+class TestStructuralLabelHeadings:
+    """Books often render the chapter label differently in the TOC and the
+    body ('1. Capitalism' vs 'CHAPTER 1' + 'Capitalism'). A leading
+    label-only element may be consumed without contributing to the match,
+    and a leading label may be dropped from the title — but the remainder
+    must still reconstruct the title exactly."""
+
+    @staticmethod
+    def _strip(html, title):
+        soup = BeautifulSoup(f"<body>{html}</body>", "html.parser")
+        before = [e.get_text(strip=True)
+                  for e in soup.body.find_all(recursive=False)]
+        epub_io._strip_title_heading(soup, title)
+        after = [e.get_text(strip=True)
+                 for e in soup.body.find_all(recursive=False)]
+        return [x for x in before if x not in after], after
+
+    BODY_LABELLED = "<p>CHAPTER 1</p><h2>Capitalism</h2><p>Real prose.</p>"
+
+    def test_numbered_title_and_labelled_body(self):
+        removed, kept = self._strip(self.BODY_LABELLED, "1. Capitalism")
+        assert removed == ["CHAPTER 1", "Capitalism"]
+        assert kept == ["Real prose."]
+
+    def test_bare_title_and_labelled_body(self):
+        removed, kept = self._strip(self.BODY_LABELLED, "Capitalism")
+        assert removed == ["CHAPTER 1", "Capitalism"]
+        assert kept == ["Real prose."]
+
+    def test_numbered_title_and_unlabelled_body(self):
+        removed, kept = self._strip(
+            "<h2>Capitalism</h2><p>Real prose.</p>", "1. Capitalism")
+        assert removed == ["Capitalism"]
+        assert kept == ["Real prose."]
+
+    def test_label_allowance_never_causes_partial_removal(self):
+        # The descriptive part diverges, so the label must NOT be eaten.
+        removed, kept = self._strip(
+            "<p>CHAPTER 1</p><h2>Something Else Entirely</h2>"
+            "<p>Real prose.</p>", "1. Capitalism")
+        assert removed == []
+        assert kept == ["CHAPTER 1", "Something Else Entirely", "Real prose."]
+
+    def test_label_alone_with_no_match_strips_nothing(self):
+        removed, _ = self._strip("<p>CHAPTER 1</p><p>Real prose.</p>",
+                                 "1. Capitalism")
+        assert removed == []
+
+    def test_roman_numeral_label(self):
+        removed, kept = self._strip(
+            "<p>CHAPTER IV</p><h2>Duality</h2><p>Real prose.</p>",
+            "4. Duality")
+        assert removed == ["CHAPTER IV", "Duality"]
+        assert kept == ["Real prose."]
 
 
 class TestExtractChapters:

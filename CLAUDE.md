@@ -32,7 +32,7 @@ boundaries, processed independently, and rejoined.
 |---|---|---|
 | `main.py` | Entry point only | Rarely |
 | `app.py` | Main window, UI wiring, slot logic | For new UI elements |
-| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); inline markup flattened so sentences are not split across lines; opt-in `mark_scene_breaks` scene-break sentinel; shared by app & worker | For chapter extraction/title logic |
+| `epub_io.py` | EPUB → ordered `Chapter` list (titles via TOC→heading→preview); inline markup flattened so sentences are not split across lines; the chapter's own display heading stripped from the body; opt-in `mark_scene_breaks` scene-break sentinel; shared by app & worker | For chapter extraction/title logic |
 | `worker.py` | Background thread, pipeline, file output (no longer extracts chapters inline — delegates to `epub_io`) | For pipeline changes |
 | `prompts.py` | All LLM prompt strings, incl. `build_context_block` (continuity) | For prompt tuning |
 | `llm.py` | LLM backends — in-process mlx-lm/mlx-vlm (default) and local Ollama; lazy optional imports, Qt-free | For backend/LLM-call changes |
@@ -178,13 +178,118 @@ All user-editable values live in `bookweaver.json`:
 
 4. **Per-chapter file (txt only)** — once a chapter completes, if `"txt"` is in
    `out_format`, its result is also written to
-   `{stem}_ES_{level}_chapters/{NN} - {title}.txt` (all modes), where `NN` is
+   `{base}_chapters/{NN} - {title}.txt` (all modes), where `base` is the
+   shared output basename (see **Output naming** below) and `NN` is
    `index + 1` for `chapter_numbering: "book"` or the processing position + 1
    for `"position"` — either way the number shown in that frontend's chapter
    list. Both this file and the
    assembled `.txt` use the shared `ProcessingWorker._chapter_block` formatter,
    so their per-chapter formatting stays identical. The assembled `.txt` is
    still written normally after all chapters.
+
+### Heading de-duplication (`epub_io`)
+
+`extract_chapters` removes each chapter's own display heading from
+`Chapter.text`. Without this the heading reaches the LLM as source text,
+the LLM echoes it into the summary, and the title lands in the output
+twice — once in the worker's `===` block and once at the top of the body.
+
+`_resolve_title` returns `(title, source)` where source is `"toc"`,
+`"heading"`, `"title"`, `"preview"` or `"filename"`. **Only `"toc"` and
+`"heading"` authorise a strip.** A `"preview"` title is literally the
+body's opening prose, so matching it would delete real content; a
+`<title>` tag is frequently the *book's* title, not the chapter's.
+
+`_strip_title_heading` can't match on tag or class — publishers vary too
+much (one book wraps `<p class="chap">CHAPTER 1</p>` plus an `<h2>` in a
+`<div class="head">`; another wraps the entire chapter in one bare
+`<div>`). Instead it walks the leading *elements* of `_content_root(soup)`
+and consumes them while their accumulated `_normalize_for_match` text is a
+prefix of the normalized title, removing them **only on a complete
+match**. Consequences worth knowing:
+
+- Elements are consumed whole, so a heading that runs into prose via
+  `<br>` can never take the first sentence with it.
+- A *partial* match strips nothing. Body `CHAPTER 3` under the title
+  `Chapter 3 Know Your Triggers` is left alone — it could be prose, and
+  deleting content is worse than a duplicated heading.
+- If the title is only part of the heading (title `Chapter 1`, body
+  `CHAPTER 1` + `WHO ARE YOU?`), only the matched leading element goes;
+  the rest of the heading stays.
+- `_content_root` descends through single-child wrappers, but only through
+  `_WRAPPER_TAGS` (`div`/`section`/`article`/`main`/`body`) — never into a
+  `<p>` or heading tag, which would let it consume inline fragments.
+
+**Structural-label allowance.** The TOC and the body routinely spell the
+same label differently (`1. Capitalism` vs `CHAPTER 1` + `Capitalism`), so
+a *leading, label-only* element may be consumed without contributing to
+the match (`_LABEL_ONLY`), and a leading label may be dropped from the
+title (`_TITLE_LABEL_PREFIX`). The remainder must still reconstruct the
+title exactly, so the allowance can never cause a partial removal.
+`_LABEL_ONLY` accepts roman numerals but only for an element that is
+*entirely* such a token — checked across all 494 strip-eligible chapters
+in `books/` with no false positives. `_TITLE_LABEL_PREFIX` is digits-only:
+stripping a roman prefix from a title would eat the `I` of `I Promise`.
+
+**Known gap (deliberate).** When the body's heading leads with something
+outside the title and isn't a bare label — title `Part Two: The Second
+Tenet`, body `PART TWO` (a word, not a numeral) — nothing is stripped and
+the heading is still duplicated. ~37% of strip-eligible chapters in
+`books/` are in this class. Closing it means matching on substrings, which
+is where real prose starts getting deleted; leave it.
+
+**Ordering in `extract_chapters` is load-bearing:** flatten inline →
+`get_text` → `MIN_CHAPTER_CHARS` filter → resolve title → strip heading →
+optionally mark scene breaks. The filter must see the **pre-strip** text or
+a heading-heavy short chapter drops out and shifts every
+`selected_chapters` index; the strip must precede the scene-break branch so
+the app's unmarked read and the worker's marked read produce identical
+bodies. Measured across the 23 books in `books/`: chapter counts unchanged
+in all of them, text removed ≤0.43%.
+
+### Output naming
+
+Every file a run produces — `.txt`, `.epub`, `.html`, `.mp3`, and the
+per-chapter subfolder — shares one basename, built once in `_run()` by the
+pure static helper `ProcessingWorker._output_basename(title, mode, out_lang,
+level)`:
+
+```
+{title}_{LANG}[_{level}]_{mode tag}
+```
+
+- **title** — `meta_title` if the user typed one, else the source EPUB's
+  stem (`meta["title"]` already resolves this). Passed through
+  `_safe_filename`, so illegal characters are stripped and the title is
+  capped at 80 chars.
+- **LANG** — `ES` or `EN`, from `out_lang`.
+- **level** — CEFR level, **Spanish output only**. No English prompt
+  consumes the level (`prompts._key_ideas_lang_line` returns a bare "Write
+  entirely in English"), so naming one on an English file would advertise a
+  setting that never applied.
+- **mode tag** — from the module-level `MODE_TAG` dict in `worker.py`:
+  `summary` (`summarise_rewrite`, `summarise_only`), `translation`
+  (`translate`), `key-ideas` (`summarise_key_ideas`). Unknown modes get
+  `output`. The tag is what stops two modes run on the same book at the
+  same level from overwriting each other.
+
+Examples: `La Casa Verde_ES_B2_translation.epub`, `mybook_EN_summary.txt`,
+`mybook_ES_C1_key-ideas_chapters/`.
+
+**`out_lang` is derived in `_run()` from `mode` + `summary_lang`, not from
+`cfg["target_lang"]`** — `settings.TARGET_LANG` hardcodes `"es"` for
+`summarise_key_ideas` and is therefore wrong when `summary_lang == "en"`.
+It is computed once, before the chapter loop, because per-chapter files are
+written inside the loop while the assembled outputs are written after it and
+the two must agree. The same value drives `lang_label`.
+
+Generated EPUB `dc:description` names the actual engine via the
+module-level `ENGINE_LABEL` dict (`mlx` → "mlx-lm", `ollama` → "Ollama",
+unknown → the raw backend string), sourced from `self._backend`.
+
+Known gap: `_write_epub` still stamps `lang="es"` on every chapter's
+`EpubHtml` regardless of `out_lang`, and `meta["language"]` defaults to
+`"es"`. Filenames are language-aware; EPUB internals are not yet.
 
 ### Cross-chunk continuity (`carry_mode`)
 
@@ -231,7 +336,7 @@ avoiding double-injection on the Spanish path.
 
 If `generate_mp3` is set and `"txt"` is among the output formats, the worker
 calls `tts.synthesise_book()` on the final `(title, text)` list as the last
-step in `run()`, producing `{stem}_ES_{level}.mp3` with ID3v2 CHAP/CTOC
+step in `run()`, producing `{base}.mp3` with ID3v2 CHAP/CTOC
 chapter markers. TTS does **not** count toward `total_steps` — it runs after
 the progress bar fills and reports via log lines only. An MP3 failure is
 logged but never fails the run (text outputs are already written).
@@ -358,7 +463,7 @@ wizard_widgets.py:368:class StepRail(QWidget):
 wizard_widgets.py:442:class ModeTileGrid(QWidget):
 wizard_widgets.py:509:class _RowMoveButtons(QWidget):
 wizard_widgets.py:547:class TriStateChapterList(QWidget):
-worker.py:37:class ProcessingWorker(QThread):
+worker.py:55:class ProcessingWorker(QThread):
 ```
 
 ---

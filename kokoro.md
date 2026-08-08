@@ -311,7 +311,7 @@ def _generate_mp3(self, results, out_folder, stem, level, meta, cfg):
 
     voice = cfg["voice"]
     lang_code = cfg["target_lang"]
-    out_path = out_folder / f"{stem}_ES_{level}.mp3"
+    out_path = out_folder / f"{base}.mp3"
 
     self.log.emit(
         f"\n🔊  Synthesising audiobook with voice '{voice}'…", "info",
